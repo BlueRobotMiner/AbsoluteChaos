@@ -1,0 +1,14 @@
+Total: 21 types of weapons.
+
+Weapon categories:
+	Pistols (3 types);
+	SMG (3 types);
+	Shotguns (3 types);
+	Assault rifles (3 types);
+	Sniper rifles (3 types);
+	Machine guns (3 types);
+	Grenade launchers (3 types).
+
+Technical details:
+	The weapons is presented in three variations: 72 ppi, 150 ppi, 300 ppi;
+	All weapons are designed in in vector format (AI file).

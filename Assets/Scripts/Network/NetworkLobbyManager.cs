@@ -11,10 +11,15 @@ using UnityEngine;
 public class NetworkLobbyManager : NetworkBehaviour
 {
     [Header("UI")]
-    [SerializeField] TMP_Text _codeText;        // relay join code — shown for public games only
-    [SerializeField] TMP_Text _ipText;          // local IP        — shown for local games only
-    [SerializeField] TMP_Text _playerCountText; // "Players: 2 / 3"
-    [SerializeField] TMP_Text _statusText;      // "Waiting for players..." / "Kill to start!"
+    [SerializeField] TMP_Text _codeText;
+    [SerializeField] TMP_Text _ipText;
+    [SerializeField] TMP_Text _playerCountText;
+    [SerializeField] TMP_Text _statusText;
+
+    [Header("Spawning")]
+    [SerializeField] GameObject  _playerPrefab;
+    [SerializeField] Transform[] _spawnPoints;
+    [SerializeField] Vector3     _spawnOffset;   // tune this to align root with visual character center
 
     // NetworkList must be initialized in Awake — field initializers crash on NGO spawn
     NetworkList<ulong> _connectedClients;
@@ -26,6 +31,7 @@ public class NetworkLobbyManager : NetworkBehaviour
         NetworkVariableWritePermission.Server);
 
     bool _gameStarted;
+    int  _nextSlot;
 
     // ── Unity ────────────────────────────────────────────────────────────
 
@@ -47,11 +53,12 @@ public class NetworkLobbyManager : NetworkBehaviour
 
         if (!IsServer) return;
 
-        NetworkManager.Singleton.OnClientConnectedCallback    += ServerOnClientConnected;
-        NetworkManager.Singleton.OnClientDisconnectCallback   += ServerOnClientDisconnected;
+        NetworkManager.Singleton.OnClientConnectedCallback  += ServerOnClientConnected;
+        NetworkManager.Singleton.OnClientDisconnectCallback += ServerOnClientDisconnected;
 
-        // Host counts as client 0
+        // Spawn host as slot 0
         _connectedClients.Add(NetworkManager.Singleton.LocalClientId);
+        SpawnPlayer(NetworkManager.Singleton.LocalClientId);
 
         // Read the join code stored by NetworkInitializer before scene loaded.
         // Public game = relay code shown; local game = empty string = text hidden.
@@ -68,16 +75,45 @@ public class NetworkLobbyManager : NetworkBehaviour
 
         NetworkManager.Singleton.OnClientConnectedCallback  -= ServerOnClientConnected;
         NetworkManager.Singleton.OnClientDisconnectCallback -= ServerOnClientDisconnected;
+        _nextSlot = 0;
     }
 
     // ── Server callbacks ─────────────────────────────────────────────────
 
     void ServerOnClientConnected(ulong clientId)
     {
+        // Skip host — already handled in OnNetworkSpawn
+        if (clientId == NetworkManager.Singleton.LocalClientId) return;
+
         _connectedClients.Add(clientId);
+        SpawnPlayer(clientId);
 
         if (_connectedClients.Count >= 3)
             SetStatusClientRpc("Kill to start!");
+    }
+
+    void SpawnPlayer(ulong clientId)
+    {
+        if (_playerPrefab == null)
+        {
+            Debug.LogError("[LobbyManager] _playerPrefab is not assigned!");
+            return;
+        }
+
+        Vector3 raw = _spawnPoints != null && _nextSlot < _spawnPoints.Length
+            ? _spawnPoints[_nextSlot].position
+            : Vector3.zero;
+        Vector3 spawnPos = new Vector3(raw.x + _spawnOffset.x, raw.y + _spawnOffset.y, 0f);
+
+        var go  = Instantiate(_playerPrefab, spawnPos, Quaternion.identity);
+        var net = go.GetComponent<NetworkObject>();
+
+        // SpawnAsPlayerObject sets ownership to clientId automatically
+        // OnGainedOwnership in PlayerController fires on the client after this completes
+        net.SpawnAsPlayerObject(clientId);
+
+        Debug.Log($"[LobbyManager] Spawned player for client {clientId} at slot {_nextSlot} pos {spawnPos}");
+        _nextSlot++;
     }
 
     void ServerOnClientDisconnected(ulong clientId)

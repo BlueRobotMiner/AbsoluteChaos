@@ -49,17 +49,6 @@ public class PlayerHealth : NetworkBehaviour
             Eliminate();
     }
 
-    /// <summary>Instant kill — called when player enters a killbox trigger.</summary>
-    void OnTriggerEnter2D(Collider2D col)
-    {
-        if (!IsServer) return;
-        if (col.CompareTag("KillBox") && Health.Value > 0)
-        {
-            Health.Value = 0;
-            Eliminate();
-        }
-    }
-
     // ── Elimination ───────────────────────────────────────────────────────
 
     void Eliminate()

@@ -102,14 +102,25 @@ public class GameManager : MonoBehaviour
     }
 }
 
-// ── Card enum (extend in Week 2 with full card data) ─────────────────────────
+// ── Card enum ────────────────────────────────────────────────────────────────
 
 public enum CardId
 {
-    SpeedBoost,
-    DoubleJump,
-    Ricochet,
-    ExplosiveShots,
-    LowGravity,
-    ShieldBurst
+    // Bullet modifiers
+    ExplosiveRounds,    // bullets explode on impact
+    Ricochet,           // bullets bounce off walls once
+    RapidFire,          // increased fire rate
+
+    // Spawn modifiers
+    HealthPackRain,     // health packs start spawning around the map
+    AmmoStash,          // ammo pickups start spawning
+
+    // Player stat modifiers
+    SpeedBoost,         // move faster
+    DoubleJump,         // jump a second time in the air
+    Fragile,            // all other players take +50% damage this round
+
+    // Environment modifiers
+    LowGravity,         // reduced gravity for everyone
+    HeavyGravity,       // increased gravity for everyone
 }

@@ -6145,9 +6145,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1a491d093341e114eb68fdea56dfeec1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _menuMusic: {fileID: 0}
-  _gameMusic: {fileID: 0}
-  _draftMusic: {fileID: 0}
+  _menuMusic: {fileID: 8300000, guid: f8ddd578d925a6c48aca147890ebf2c6, type: 3}
+  _gameMusic: {fileID: 8300000, guid: e4b701f99e71da9468eb517551fc4177, type: 3}
+  _draftMusic: {fileID: 8300000, guid: 1b5b770a47644ab4181ee3c6419ec752, type: 3}
   _shootSFX: {fileID: 0}
   _hitSFX: {fileID: 0}
   _deathSFX: {fileID: 0}

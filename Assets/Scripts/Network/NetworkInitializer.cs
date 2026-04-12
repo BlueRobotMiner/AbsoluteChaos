@@ -32,6 +32,10 @@ public class NetworkInitializer : MonoBehaviour
 
     bool _busy;
 
+    // ── Whether this machine is currently the server/host ─────────────────
+    static bool IsServer    => NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
+    static bool IsListening => NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
+
     void Awake()
     {
         Instance = this;
@@ -43,6 +47,8 @@ public class NetworkInitializer : MonoBehaviour
     public async void HostOnlineAsync()
     {
         if (_busy) return;
+        if (IsListening) { OnNetworkError?.Invoke("Already connected."); return; }
+
         _busy = true;
         OnConnecting?.Invoke();
 
@@ -52,7 +58,14 @@ public class NetworkInitializer : MonoBehaviour
 
             NetworkManager.Singleton.StartHost();
 
-            // LoadScene must be called AFTER StartHost(); requires "Enable Scene Management" on NetworkManager
+            // Only the server/host drives scene loading — clients follow automatically
+            if (!IsServer)
+            {
+                OnNetworkError?.Invoke("Failed to become host.");
+                _busy = false;
+                return;
+            }
+
             NetworkManager.Singleton.SceneManager.LoadScene(_lobbyScene, LoadSceneMode.Single);
         }
         catch (Exception e)
@@ -67,6 +80,8 @@ public class NetworkInitializer : MonoBehaviour
     public void HostLocalAsync()
     {
         if (_busy) return;
+        if (IsListening) { OnNetworkError?.Invoke("Already connected."); return; }
+
         _busy = true;
         OnConnecting?.Invoke();
 
@@ -75,10 +90,18 @@ public class NetworkInitializer : MonoBehaviour
             NetworkManager.Singleton.GetComponent<UnityTransport>()
                 .SetConnectionData("0.0.0.0", 7777);
 
-            // Empty string signals NetworkLobbyManager to hide the code text
             PendingJoinCode = string.Empty;
 
             NetworkManager.Singleton.StartHost();
+
+            // Guard: only proceed with scene load if we're actually the server
+            if (!IsServer)
+            {
+                OnNetworkError?.Invoke("Failed to become host.");
+                _busy = false;
+                return;
+            }
+
             NetworkManager.Singleton.SceneManager.LoadScene(_lobbyScene, LoadSceneMode.Single);
         }
         catch (Exception e)
@@ -95,6 +118,9 @@ public class NetworkInitializer : MonoBehaviour
     public async void JoinOnlineAsync(string joinCode)
     {
         if (_busy) return;
+        if (IsListening) { OnNetworkError?.Invoke("Already connected."); return; }
+        if (IsServer)    { OnNetworkError?.Invoke("Cannot join as a server."); return; }
+
         _busy = true;
         OnConnecting?.Invoke();
 
@@ -102,7 +128,7 @@ public class NetworkInitializer : MonoBehaviour
         {
             await _relay.JoinRelayAsync(joinCode);
             NetworkManager.Singleton.StartClient();
-            // Server loads scene for all clients — we do nothing here
+            // Server drives scene loading for all clients — clients do nothing here
         }
         catch (Exception e)
         {
@@ -116,6 +142,9 @@ public class NetworkInitializer : MonoBehaviour
     public void JoinLocalAsync(string ip)
     {
         if (_busy) return;
+        if (IsListening) { OnNetworkError?.Invoke("Already connected."); return; }
+        if (IsServer)    { OnNetworkError?.Invoke("Cannot join as a server."); return; }
+
         _busy = true;
         OnConnecting?.Invoke();
 
@@ -138,6 +167,7 @@ public class NetworkInitializer : MonoBehaviour
 
     public void Disconnect()
     {
+        if (!IsListening) return;   // nothing to disconnect from
         NetworkManager.Singleton.Shutdown();
         _busy = false;
         SceneManager.LoadScene("MainMenu", LoadSceneMode.Single);
@@ -156,7 +186,7 @@ public class NetworkInitializer : MonoBehaviour
             NetworkManager.Singleton.OnTransportFailure -= HandleTransportFailure;
     }
 
-    void HandleTransportFailure()
+    private void HandleTransportFailure()
     {
         Debug.LogError("[NetworkInitializer] Transport failure.");
         OnNetworkError?.Invoke("Connection lost.");
