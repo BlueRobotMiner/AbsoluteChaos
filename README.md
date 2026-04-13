@@ -1,18 +1,20 @@
 # AbsoluteChaos - Multiplayer Arena Game
 
-A fast-paced multiplayer arena game built in Unity where players compete to eliminate each other across rounds. The game features local and online multiplayer support, round-based scoring, and experimental combat systems currently in development.
+A fast-paced multiplayer arena game built in Unity where players compete to eliminate each other across rounds. The game features local multiplayer connectivity, a round-based scoring system, and core gameplay systems including player movement and match flow.
+
+[GitHub Repository](https://github.com/BlueRobotMiner/AbsoluteChaos)
 
 ## Setup
 
 ### Prerequisites
-- Unity 6
+- Unity 2022.3.62f3
 - Git
 
 ### Installation
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/absolutechaos.git
+git clone https://github.com/BlueRobotMiner/AbsoluteChaos.git
 ```
 
 2. Open the project in Unity Hub  
@@ -71,34 +73,36 @@ AbsoluteChaos/
 - Location: Assets/Scripts/Managers/GameManager.cs  
 - Description: Manages match scoring, win condition (first to 5), and scene transitions  
 
-**Object Pool Pattern**
+**Object Pool Pattern (Additional Design Pattern)**
 - Location: Assets/Scripts/Combat/ProjectilePool.cs  
-- Description: Pools projectile instances for improved performance during combat  
+- Description: Pools projectile instances to improve performance during gameplay  
 
-**Hybrid Networking**
+**Multiplayer Networking (Core System)**
 - Location: Assets/Scripts/Networking/NetworkInitializer.cs  
-- Description: Switches between Unity Relay and Local IP transport depending on connection type  
+- Description: Handles host/client setup and switches between Local IP and Unity Relay connections  
 
 ## Known Issues
 
-- Combat projectiles are currently disabled; Player 2 firing is broken  
-- Player card stack only displays one card instead of the full list  
-- Air movement feels floaty instead of using natural gravity  
-- Rematch spawns a duplicate Player 1 instance  
+- Combat system is partially implemented; Player 2 cannot shoot  
+- Player card UI only displays one card instead of the full list  
+- Movement physics feel floaty during jumps  
+- Rematch system duplicates Player 1  
 - Player 2 UI does not update correctly on some maps  
-- Lobby and Relay systems are not fully tested  
+- Relay networking is not fully tested  
 
 ## Future Enhancements (Final Submission)
 
-- Card icon system to replace text-based UI  
-- SQLite integration for lifetime stats tracking  
-- AudioManager for music transitions  
-- Visual upgrade with neon assets and bloom effects  
+- Implement working combat system for all players  
+- Add SQLite database for persistent player statistics  
+- Improve physics for more realistic movement  
+- Complete Relay multiplayer system  
+- Add AudioManager for music transitions  
+- Replace placeholder graphics with finalized assets and visual effects  
 
 ## Technologies Used
 
 - Unity 6: Game engine  
 - Netcode for GameObjects: Multiplayer networking  
 - Unity Relay: Online connectivity  
-- SQLite (WIP): Persistent data storage  
+- SQLite (planned): Persistent data storage  
 - TextMeshPro: UI text rendering  
