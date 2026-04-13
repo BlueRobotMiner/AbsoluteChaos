@@ -12,7 +12,7 @@ EditorBuildSettings:
     path: Assets/Scenes/Lobby.unity
     guid: acf8514fe1daa814a8c8d10815bbf8ab
   - enabled: 1
-    path: Assets/Scenes/CardDaft.unity
+    path: Assets/Scenes/CardDraft.unity
     guid: d37f160d81b16eb40b4bde6b43db73f5
   - enabled: 1
     path: Assets/Scenes/Map1.unity

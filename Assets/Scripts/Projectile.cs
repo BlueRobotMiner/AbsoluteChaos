@@ -13,6 +13,9 @@ public class Projectile : MonoBehaviour
     [SerializeField] int   _damage   = 25;
     [SerializeField] float _lifetime = 3f;
 
+    public float Speed    => _speed;
+    public float Lifetime => _lifetime;
+
     Rigidbody2D _rb;
     ulong       _ownerClientId;
 
@@ -39,7 +42,7 @@ public class Projectile : MonoBehaviour
     // ── API ───────────────────────────────────────────────────────────────
 
     /// <summary>Called by PlayerCombat (server-side) to set velocity and owner.</summary>
-    public void Launch(Vector3 direction, ulong ownerClientId)
+    public void Launch(Vector2 direction, ulong ownerClientId)
     {
         _ownerClientId = ownerClientId;
         _rb.velocity   = direction.normalized * _speed;
@@ -50,21 +53,26 @@ public class Projectile : MonoBehaviour
     // Only process hits on the server — authority sits there
     void OnTriggerEnter2D(Collider2D col)
     {
-        // We only run physics/collision on the server side for this object
-        // (projectiles are not NetworkObjects, so IsServer check via NetworkManager)
+        // Projectiles are not NetworkObjects — authority lives on server only
         if (!Unity.Netcode.NetworkManager.Singleton.IsServer) return;
 
-        PlayerHealth ph = col.GetComponent<PlayerHealth>();
-        if (ph == null) return;
+        PlayerHealth ph = col.GetComponentInParent<PlayerHealth>();
 
-        // Don't damage the shooter
-        if (ph.OwnerClientId == _ownerClientId) return;
+        if (ph != null)
+        {
+            // Don't damage the shooter
+            if (ph.OwnerClientId == _ownerClientId) return;
 
-        ph.TakeDamageServerRpc(_damage);
+            ph.TakeDamageServerRpc(_damage);
 
-        if (AudioManager.Instance != null)
-            AudioManager.Instance.PlayHitSFX();
+            if (AudioManager.Instance != null)
+                AudioManager.Instance.PlayHitSFX();
+        }
 
+        // Tell all clients to remove the nearest visual bullet at this position
+        ProjectilePool.Instance?.BroadcastHit(_rb.position);
+
+        // Return server bullet to pool
         ReturnToPool();
     }
 

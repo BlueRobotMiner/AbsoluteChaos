@@ -109,8 +109,15 @@ public class NetworkLobbyManager : NetworkBehaviour
         var net = go.GetComponent<NetworkObject>();
 
         // SpawnAsPlayerObject sets ownership to clientId automatically
-        // OnGainedOwnership in PlayerController fires on the client after this completes
         net.SpawnAsPlayerObject(clientId);
+
+        // Push the correct spawn position to all clients immediately — before any FixedUpdate runs
+        // Without this, _syncedPosition starts at Vector2.zero and non-owners jump to (0,0)
+        go.GetComponent<PlayerController>().InitializePositionClientRpc(new Vector2(spawnPos.x, spawnPos.y));
+
+        // Set player slot on PlayerHealth so kills report the correct player index
+        var ph = go.GetComponent<PlayerHealth>();
+        if (ph != null) ph.SetPlayerSlot(_nextSlot);
 
         Debug.Log($"[LobbyManager] Spawned player for client {clientId} at slot {_nextSlot} pos {spawnPos}");
         _nextSlot++;
@@ -136,9 +143,11 @@ public class NetworkLobbyManager : NetworkBehaviour
     /// </summary>
     public void NotifyKill()
     {
-        if (!IsServer || _gameStarted) return;
-        if (_connectedClients.Count < 3) return;
+        if (!IsServer)     { Debug.Log("[Lobby] NotifyKill ignored — not server.");  return; }
+        if (_gameStarted)  { Debug.Log("[Lobby] NotifyKill ignored — already started."); return; }
+        if (_connectedClients.Count < 2) { Debug.Log($"[Lobby] NotifyKill ignored — only {_connectedClients.Count} player(s) connected, need at least 2."); return; }
 
+        Debug.Log($"[Lobby] Kill registered with {_connectedClients.Count} players — loading CardDraft.");
         _gameStarted = true;
         StartCoroutine(TransitionToCardDraft());
     }

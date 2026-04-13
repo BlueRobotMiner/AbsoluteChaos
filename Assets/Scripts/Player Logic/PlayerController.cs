@@ -7,28 +7,28 @@ public class PlayerController : NetworkBehaviour
     [Header("Movement")]
     public GameObject  leftLeg;
     public GameObject  rightLeg;
-    public Rigidbody2D rb;           // Body Rigidbody2D — assign in Inspector
+    public Rigidbody2D rb;
     public float       speed = 1.5f;
 
     [Header("Step Feel")]
-    public float stepWait      = 0.25f;  // seconds between alternate foot lifts
-    public float stepLiftForce = 1.5f;   // upward impulse on the stepping foot
-    public float bodyBounce    = 0.3f;   // micro body bob each step (set 0 to disable)
-    public float stoppingDrag  = 12f;    // how fast body kills horizontal slide
+    public float stepWait      = 0.25f;
+    public float stepLiftForce = 1.5f;
+    public float bodyBounce    = 0.3f;
+    public float stoppingDrag  = 12f;
 
     [Header("Lean")]
-    public BalanceController torsoBalance;  // drag Torso's BalanceController here
-    public float leanFactor    = 5f;        // velocity multiplier for lean angle
-    public float maxLean       = 20f;       // max degrees of tilt
-    public float leanSmoothing = 8f;        // lean interpolation speed
+    public BalanceController torsoBalance;
+    public float leanFactor    = 5f;
+    public float maxLean       = 20f;
+    public float leanSmoothing = 8f;
 
     [Header("Jump")]
-    [SerializeField] float _jumpForce = 10f;
+    [SerializeField] float _jumpForce = 15f;  // launch velocity — what you set is what you get
 
     [Header("Ground Check")]
-    public Transform playerPos;       // centre — used for jump check
-    public Transform leftFootPos;     // empty GO at left foot
-    public Transform rightFootPos;    // empty GO at right foot
+    public Transform playerPos;
+    public Transform leftFootPos;
+    public Transform rightFootPos;
     public float     positionRadius;
     public LayerMask ground;
 
@@ -47,17 +47,45 @@ public class PlayerController : NetworkBehaviour
         new(0.2f, 1f, 0.4f, 1f),
     };
 
-    // Owner writes position — everyone else reads it (mirrors Pong paddle sync pattern)
+    // ── Synced state (server writes, everyone reads) ───────────────────────
     NetworkVariable<Vector2> _syncedPosition = new NetworkVariable<Vector2>(
         Vector2.zero,
         NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Owner);
+        NetworkVariableWritePermission.Server);
 
+    NetworkVariable<int> _syncedAnimDir = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    // Server writes airborne state — clients play jump anim when true
+    NetworkVariable<bool> _syncedAirborne = new NetworkVariable<bool>(
+        false,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    // ── Server-side buffered input ─────────────────────────────────────────
+    float _pendingH;
+    float _pendingAimAngle;
+    bool  _pendingJump;
+
+    // ── Input RPC throttle (client → server) ───────────────────────────────
+    float _lastSentH;
+    float _lastSentAim;
+    float _inputSendTimer;
+    const float InputSendInterval = 0.05f; // fallback heartbeat: 20/sec max
+
+    // ── Private state ──────────────────────────────────────────────────────
     Rigidbody2D _leftLegRb;
     Rigidbody2D _rightLegRb;
     bool  _inputEnabled = true;
     bool  _leftStep     = true;
     float _walkTimer;
+
+    // Jump buffer — keeps the jump request alive for several physics frames
+    // so a momentary failed ground check doesn't silently eat the Space press
+    int _jumpBufferFrames;
+    const int JumpBufferMax = 6;
 
     // Draft mode
     bool           _draftMode;
@@ -79,29 +107,36 @@ public class PlayerController : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
+        // Only the local owner sees through their camera
         Camera cam = GetComponentInChildren<Camera>();
         if (cam != null) cam.enabled = IsOwner;
 
-        // Color by slot
-        int slot = GetPlayerSlot();
-        Color col = slot < _slotColors.Length ? _slotColors[slot] : Color.white;
+        // Color by connection slot
+        int   slot = GetPlayerSlot();
+        Color col  = slot < _slotColors.Length ? _slotColors[slot] : Color.white;
         foreach (var sr in GetComponentsInChildren<SpriteRenderer>())
             sr.color = col;
 
-        if (!IsOwner)
+        if (IsServer)
         {
-            // Non-owners: root RB stays kinematic forever — position driven by _syncedPosition
-            if (rb != null)
-            {
-                rb.isKinematic = true;
-                rb.simulated   = false;
-            }
+            // Server owns all physics — hold root kinematic for 2 frames so spawn position settles
+            if (rb != null) rb.isKinematic = true;
+            StartCoroutine(UnlockPhysicsAfterSync());
         }
         else
         {
-            // Owner: wait 2 physics frames so _syncedPosition has a valid value before releasing physics
-            if (rb != null) rb.isKinematic = true;
-            StartCoroutine(UnlockPhysicsAfterSync());
+            // Clients are pure renderers — disable ALL rigidbodies completely
+            foreach (var r in GetComponentsInChildren<Rigidbody2D>())
+            {
+                r.isKinematic = true;
+                r.simulated   = false;
+            }
+        }
+
+        if (IsOwner)
+        {
+            Cursor.lockState = CursorLockMode.Confined;
+            Cursor.visible   = true;
         }
     }
 
@@ -112,11 +147,42 @@ public class PlayerController : NetworkBehaviour
         if (rb != null) rb.isKinematic = false;
     }
 
+    [ClientRpc]
+    public void InitializePositionClientRpc(Vector2 spawnPos)
+    {
+        if (IsServer)
+        {
+            // Shift every ragdoll body by the same delta so joints don't fight each other
+            if (rb != null)
+            {
+                Vector2 delta = spawnPos - rb.position;
+                foreach (var r in GetComponentsInChildren<Rigidbody2D>())
+                {
+                    r.position       += delta;
+                    r.velocity        = Vector2.zero;
+                    r.angularVelocity = 0f;
+                }
+            }
+
+            _syncedPosition.Value = spawnPos;
+
+            // Force-broadcast new positions so clients snap rather than lerp from old spot
+            GetComponent<RagdollSync>()?.ServerTeleport(spawnPos);
+        }
+        else
+        {
+            // Root snap — RagdollSync.SnapStateClientRpc (sent by server above) handles the limbs
+            transform.position = new Vector3(spawnPos.x, spawnPos.y, 0f);
+        }
+    }
+
     public override void OnGainedOwnership()
     {
         Camera cam = GetComponentInChildren<Camera>();
         if (cam != null) cam.enabled = true;
         _inputEnabled = true;
+        Cursor.lockState = CursorLockMode.Confined;
+        Cursor.visible   = true;
     }
 
     public override void OnLostOwnership()
@@ -126,48 +192,138 @@ public class PlayerController : NetworkBehaviour
         _inputEnabled = false;
     }
 
-    // ── Input guard ────────────────────────────────────────────────────────
-
-    bool CanInput => _inputEnabled && (IsOwner || !IsSpawned);
-
-    // ── Update ─────────────────────────────────────────────────────────────
+    // ── Update — input capture only, no physics ────────────────────────────
 
     void Update()
     {
-        if (!CanInput) return;
+        if (!IsSpawned) return;
+
+        // All non-server clients: render synced animation
+        if (!IsServer)
+            ApplySyncedAnimation(_syncedAnimDir.Value);
+
+        // Only the owner captures input
+        if (!IsOwner || !_inputEnabled || !Application.isFocused) return;
         if (_draftMode) { HandleDraftInput(); return; }
-        HandleJump();
-        HandleAnimation();
+
+        float h    = Input.GetAxisRaw("Horizontal");
+        bool  jump = Input.GetKeyDown(KeyCode.Space);
+        float aim  = GetAimAngle();
+
+        if (IsServer)
+        {
+            // Host: buffer input directly — no RPC needed
+            _pendingH         = h;
+            _pendingAimAngle  = aim;
+            if (jump) _pendingJump = true;
+        }
+        else
+        {
+            // Client: only send when input changes meaningfully, or as a heartbeat
+            bool hChanged   = Mathf.Abs(h   - _lastSentH)   > 0.05f;
+            bool aimChanged = Mathf.Abs(Mathf.DeltaAngle(aim, _lastSentAim)) > 1f;
+            _inputSendTimer += Time.deltaTime;
+            bool timerFired = _inputSendTimer >= InputSendInterval;
+
+            if (hChanged || aimChanged || jump || timerFired)
+            {
+                _lastSentH        = h;
+                _lastSentAim      = aim;
+                _inputSendTimer   = 0f;
+                SendInputServerRpc(h, jump, aim);
+            }
+        }
     }
+
+    // ── FixedUpdate — server runs physics, clients lerp ───────────────────
 
     void FixedUpdate()
     {
         if (!IsSpawned) return;
 
-        if (!IsOwner)
+        if (!IsServer)
         {
-            // Non-owner: read the owner's broadcast position and follow it
-            if (rb != null)
-                rb.MovePosition(_syncedPosition.Value);
+            // Client: lerp root transform directly — rb.simulated is false so MovePosition does nothing
+            Vector2 smoothed = Vector2.Lerp(
+                (Vector2)transform.position, _syncedPosition.Value, 20f * Time.fixedDeltaTime);
+            transform.position = new Vector3(smoothed.x, smoothed.y, 0f);
             return;
         }
 
-        if (!CanInput) return;
-        HandleMove();
+        // ── Server: apply buffered input and run physics ───────────────────
+        if (!_inputEnabled) return;
 
-        // Owner: broadcast current position so all other clients can follow
+        HandleMove(_pendingH);
+
+        if (_pendingJump)
+        {
+            _pendingJump = false;
+            _jumpBufferFrames = JumpBufferMax;
+        }
+
+        if (_jumpBufferFrames > 0)
+        {
+            _jumpBufferFrames--;
+            TryJump();   // keeps trying until grounded or buffer expires
+        }
+
+        // Feed aim angle to ArmAimController so it points correctly on server
+        var aim = GetComponent<ArmAimController>();
+        if (aim != null) aim.SetServerAimAngle(_pendingAimAngle);
+
+        // Broadcast position (only when it moved enough to matter)
         if (rb != null)
-            _syncedPosition.Value = rb.position;
+        {
+            Vector2 cur = rb.position;
+            if (Vector2.Distance(cur, _syncedPosition.Value) > 0.02f)
+                _syncedPosition.Value = cur;
+        }
+
+        // Broadcast animation direction
+        int dir = _pendingH > 0 ? 1 : _pendingH < 0 ? -1 : 0;
+        if (dir != _syncedAnimDir.Value) _syncedAnimDir.Value = dir;
+
+        // Broadcast airborne state — use all ground check points so any foot contact counts
+        bool grounded = (leftFootPos   != null && Physics2D.OverlapCircle(leftFootPos.position,   positionRadius, ground))
+                     || (rightFootPos  != null && Physics2D.OverlapCircle(rightFootPos.position,  positionRadius, ground))
+                     || (playerPos     != null && Physics2D.OverlapCircle(playerPos.position,     positionRadius, ground));
+        bool airborne = !grounded;
+        if (airborne != _syncedAirborne.Value) _syncedAirborne.Value = airborne;
+
+
+        ApplySyncedAnimation(dir);
+    }
+
+    // ── ServerRpc — client sends raw input each frame ──────────────────────
+
+    [ServerRpc]
+    void SendInputServerRpc(float h, bool jump, float aimAngle)
+    {
+        _pendingH        = h;
+        _pendingAimAngle = aimAngle;
+        if (jump) _pendingJump = true;
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    float GetAimAngle()
+    {
+        if (Camera.main == null || GetComponent<ArmAimController>() == null) return 0f;
+        var shoulder = GetComponent<ArmAimController>().Shoulder;
+        if (shoulder == null) return 0f;
+        Vector2 mouseWorld = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 toMouse    = mouseWorld - (Vector2)shoulder.position;
+        return Mathf.Atan2(toMouse.y, toMouse.x) * Mathf.Rad2Deg;
     }
 
     // ── Animation ──────────────────────────────────────────────────────────
 
-    void HandleAnimation()
+    void ApplySyncedAnimation(int dir)
     {
-        float h = Input.GetAxisRaw("Horizontal");
-        if      (h > 0) anim.Play("WalkRight");
-        else if (h < 0) anim.Play("WalkLeft");
-        else            anim.Play("Idle");
+        if (anim == null) return;
+        if      (dir > 0) anim.Play("WalkRight");
+        else if (dir < 0) anim.Play("WalkLeft");
+        else              anim.Play("Idle");
     }
 
     // ── Draft mode ─────────────────────────────────────────────────────────
@@ -177,6 +333,11 @@ public class PlayerController : NetworkBehaviour
         _draftMode    = active;
         _draftCards   = cards;
         _draftManager = manager;
+
+        // Disable / re-enable shooting when entering / leaving draft
+        var combat = GetComponent<PlayerCombat>();
+        if (combat != null) combat.SetShootingEnabled(!active);
+
         if (!active && _hoveredDraftCard != null)
         {
             _hoveredDraftCard.IsHovered = false;
@@ -188,79 +349,70 @@ public class PlayerController : NetworkBehaviour
     {
         if (_draftCards == null || Camera.main == null) return;
 
-        // Find the card closest to the mouse in screen space
-        Vector2 mouseScreen = Input.mousePosition;
+        // ── Find which card the mouse is directly over (screen-space rect check) ──
         CardSlot nearest    = null;
-        float   minDist     = float.MaxValue;
+        int      nearestIdx = -1;
 
-        foreach (var card in _draftCards)
+        Camera uiCam = Camera.main;   // Screen Space - Camera mode
+
+        for (int i = 0; i < _draftCards.Length; i++)
         {
-            // Convert each card's RectTransform screen position for comparison
-            Vector2 cardScreen = RectTransformUtility.WorldToScreenPoint(null, card.transform.position);
-            float d = Vector2.Distance(mouseScreen, cardScreen);
-            if (d < minDist) { minDist = d; nearest = card; }
+            var rect = _draftCards[i].GetComponent<RectTransform>();
+            if (rect == null) continue;
+
+            if (RectTransformUtility.RectangleContainsScreenPoint(rect, Input.mousePosition, uiCam))
+            {
+                nearest    = _draftCards[i];
+                nearestIdx = i;
+                break;   // mouse can only be over one card at a time
+            }
         }
 
-        // Update hover highlight
-        foreach (var card in _draftCards)
-            card.IsHovered = (card == nearest);
-        _hoveredDraftCard = nearest;
+        // ── Sync hover to all clients when it changes ───────────────────
+        if (nearest != _hoveredDraftCard)
+        {
+            _hoveredDraftCard = nearest;
+            if (_draftManager != null)
+                _draftManager.UpdateHoverServerRpc(nearestIdx);
+        }
 
-        // Play walk animation toward hovered card's world target
+        // ── Calculate h and send movement to server ─────────────────────
+        float h = 0f;
         if (nearest != null && rb != null)
         {
-            float targetX = nearest.WorldTarget != null
-                ? nearest.WorldTarget.position.x
-                : rb.position.x;
-            float dx = targetX - rb.position.x;
-            float h  = Mathf.Abs(dx) > 0.3f ? Mathf.Sign(dx) : 0f;
-            if      (h > 0) anim.Play("WalkRight");
-            else if (h < 0) anim.Play("WalkLeft");
-            else            anim.Play("Idle");
+            float targetX = nearest.WorldTarget != null ? nearest.WorldTarget.position.x : rb.position.x;
+            float dx      = targetX - rb.position.x;
+            h             = Mathf.Abs(dx) > 0.3f ? Mathf.Sign(dx) : 0f;
         }
 
-        // Space confirms the pick
-        if (Input.GetKeyDown(KeyCode.Space) && _hoveredDraftCard != null && _draftManager != null)
+        _inputSendTimer += Time.deltaTime;
+        bool hChanged = Mathf.Abs(h - _lastSentH) > 0.05f;
+        if (hChanged || _inputSendTimer >= InputSendInterval)
+        {
+            _lastSentH      = h;
+            _inputSendTimer = 0f;
+            if (IsServer) _pendingH = h;
+            else          SendInputServerRpc(h, false, 0f);
+        }
+
+        // ── Right click to select hovered card ──────────────────────────
+        if (Input.GetMouseButtonDown(0) && _hoveredDraftCard != null && _draftManager != null)
         {
             _draftMode = false;
-            foreach (var card in _draftCards) card.IsHovered = false;
+            _draftManager.UpdateHoverServerRpc(-1);   // clear hover on all screens
             _draftManager.SubmitPickServerRpc(GetPlayerSlotPublic(), (int)_hoveredDraftCard.CardId);
         }
     }
 
-    // ── Movement ───────────────────────────────────────────────────────────
+    // ── Movement (server only) ─────────────────────────────────────────────
 
-    void HandleMove()
+    void HandleMove(float h)
     {
-        if (_draftMode && rb != null)
-        {
-            // Walk character toward the hovered card's X position
-            float draftH = 0f;
-            if (_hoveredDraftCard != null)
-            {
-                float targetX = _hoveredDraftCard.WorldTarget != null
-                    ? _hoveredDraftCard.WorldTarget.position.x
-                    : rb.position.x;
-                float dx = targetX - rb.position.x;
-                draftH = Mathf.Abs(dx) > 0.3f ? Mathf.Sign(dx) : 0f;
-            }
-            if (draftH != 0)
-                rb.MovePosition(rb.position + Vector2.right * (draftH * speed * Time.fixedDeltaTime));
-            else
-                rb.velocity = new Vector2(rb.velocity.x * (1f - stoppingDrag * Time.fixedDeltaTime), rb.velocity.y);
-            UpdateLean();
-            HandleStep(draftH);
-            return;
-        }
+        if (rb == null) return;
 
-        float h = Input.GetAxisRaw("Horizontal");
-
-        // Smooth body translation — everything else follows via joints
-        if (h != 0 && rb != null)
+        if (h != 0)
             rb.MovePosition(rb.position + Vector2.right * (h * speed * Time.fixedDeltaTime));
-
-        // Kill horizontal slide when input releases
-        if (Mathf.Abs(h) < 0.1f && rb != null)
+        else
             rb.velocity = new Vector2(
                 rb.velocity.x * (1f - stoppingDrag * Time.fixedDeltaTime),
                 rb.velocity.y);
@@ -269,7 +421,6 @@ public class PlayerController : NetworkBehaviour
         HandleStep(h);
     }
 
-    // Lean follows actual velocity — smooth and physics-accurate
     void UpdateLean()
     {
         if (torsoBalance == null || rb == null) return;
@@ -278,7 +429,6 @@ public class PlayerController : NetworkBehaviour
             torsoBalance.targetRotation, target, leanSmoothing * Time.fixedDeltaTime);
     }
 
-    // Per-foot ground detection — only lifts a foot that is actually touching ground
     void HandleStep(float h)
     {
         bool leftGrounded  = leftFootPos  != null && Physics2D.OverlapCircle(leftFootPos.position,  positionRadius, ground);
@@ -291,48 +441,46 @@ public class PlayerController : NetworkBehaviour
         }
 
         _walkTimer += Time.fixedDeltaTime;
+        if (_walkTimer < stepWait) return;
 
-        if (_walkTimer >= stepWait)
+        _walkTimer = 0f;
+        bool wantLeft  = _leftStep  && leftGrounded;
+        bool wantRight = !_leftStep && rightGrounded;
+
+        Rigidbody2D stepping = null;
+        if      (wantLeft)  stepping = _leftLegRb;
+        else if (wantRight) stepping = _rightLegRb;
+
+        if (stepping != null)
         {
-            _walkTimer = 0f;
-
-            // Lift whichever foot is grounded this step; skip if that foot is already mid-air
-            bool wantLeft  = _leftStep  && leftGrounded;
-            bool wantRight = !_leftStep && rightGrounded;
-
-            Rigidbody2D stepping = null;
-            if      (wantLeft)  stepping = _leftLegRb;
-            else if (wantRight) stepping = _rightLegRb;
-
-            if (stepping != null)
-            {
-                stepping.AddForce(Vector2.up * stepLiftForce, ForceMode2D.Impulse);
-                if (rb != null)
-                    rb.AddForce(Vector2.up * bodyBounce, ForceMode2D.Impulse);
-            }
-
-            _leftStep = !_leftStep;
+            stepping.AddForce(Vector2.up * stepLiftForce, ForceMode2D.Impulse);
+            rb.AddForce(Vector2.up * bodyBounce, ForceMode2D.Impulse);
         }
+
+        _leftStep = !_leftStep;
     }
 
-    // ── Jump ───────────────────────────────────────────────────────────────
-
-    void HandleJump()
+    void TryJump()
     {
-        bool isOnGround = Physics2D.OverlapCircle(playerPos.position, positionRadius, ground);
+        if (rb == null) return;
 
-        if (isOnGround && Input.GetKeyDown(KeyCode.Space))
-        {
-            rb.AddForce(Vector2.up * _jumpForce);
+        // Check feet first, then fall back to a broad torso-level cast so
+        // ragdoll foot wobble doesn't prevent jumping when clearly on the ground
+        bool leftGrounded   = leftFootPos  != null && Physics2D.OverlapCircle(leftFootPos.position,  positionRadius,        ground);
+        bool rightGrounded  = rightFootPos != null && Physics2D.OverlapCircle(rightFootPos.position, positionRadius,        ground);
+        bool centerGrounded = playerPos    != null && Physics2D.OverlapCircle(playerPos.position,    positionRadius * 2.5f, ground);
 
-            if (AudioManager.Instance != null)
-                AudioManager.Instance.PlayJumpSFX();
-        }
+        if (!leftGrounded && !rightGrounded && !centerGrounded) return;
+
+        // Grounded — consume buffer and launch
+        _jumpBufferFrames = 0;
+        rb.velocity = new Vector2(rb.velocity.x, _jumpForce);
+
+        if (AudioManager.Instance != null)
+            AudioManager.Instance.PlayJumpSFX();
     }
 
-    // ── Gun pickup ─────────────────────────────────────────────────────────
-
-    // ── Helpers ────────────────────────────────────────────────────────────
+    // ── Public API ─────────────────────────────────────────────────────────
 
     public int GetPlayerSlotPublic() => GetPlayerSlot();
 

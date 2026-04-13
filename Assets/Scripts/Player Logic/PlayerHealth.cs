@@ -12,10 +12,12 @@ public class PlayerHealth : NetworkBehaviour
     [SerializeField] int _maxHealth = 100;
 
     [Header("UI")]
-    [SerializeField] TMPro.TMP_Text _healthText;   // optional on-player health label
+    [SerializeField] UnityEngine.UI.Slider _healthBar;  // world-space slider above head
+    [SerializeField] TMPro.TMP_Text        _healthText; // optional label inside the bar
+    [SerializeField] GameObject            _healthBarRoot; // the Canvas GO — drag the HealthBarCanvas here
 
     public NetworkVariable<int> Health = new NetworkVariable<int>(
-        100,
+        0,
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server);
 
@@ -27,7 +29,10 @@ public class PlayerHealth : NetworkBehaviour
     public override void OnNetworkSpawn()
     {
         Health.OnValueChanged += OnHealthChanged;
-        UpdateHealthUI(Health.Value);
+
+        // Server sets the canonical starting value — all clients see it via OnValueChanged
+        if (IsServer) Health.Value = _maxHealth;
+        else          UpdateHealthUI(Health.Value);
     }
 
     public override void OnNetworkDespawn()
@@ -57,12 +62,15 @@ public class PlayerHealth : NetworkBehaviour
         GameManager.Instance?.NotifyPlayerEliminated(_playerSlot);
 
         // Tell the lobby manager a kill happened (for the first-kill game-start trigger)
-        var lobbyManager = FindObjectOfType<NetworkLobbyManager>();
+        var lobbyManager = FindObjectOfType<NetworkLobbyManager>(true);
         if (lobbyManager != null)
             lobbyManager.NotifyKill();
+        else
+            Debug.Log("[PlayerHealth] NetworkLobbyManager not found — probably not in Lobby scene.");
 
-        // Disable input on the owning client
+        // Disable input and hide the player on every client
         DisableInputClientRpc();
+        HidePlayerClientRpc();
 
         // Check if only one player remains alive
         CheckRoundEnd();
@@ -70,14 +78,15 @@ public class PlayerHealth : NetworkBehaviour
 
     void CheckRoundEnd()
     {
-        // Count living players — any with Health.Value > 0
-        PlayerHealth[] allPlayers = FindObjectsOfType<PlayerHealth>();
-        int aliveCount  = 0;
-        int winnerSlot  = -1;
+        // Only active GOs are alive — dead players are hidden (SetActive false)
+        // includeInactive = true so we can count total players, but filter by active
+        PlayerHealth[] allPlayers = FindObjectsOfType<PlayerHealth>(true);
+        int aliveCount = 0;
+        int winnerSlot = -1;
 
         foreach (var ph in allPlayers)
         {
-            if (ph.Health.Value > 0)
+            if (ph.gameObject.activeSelf)
             {
                 aliveCount++;
                 winnerSlot = ph._playerSlot;
@@ -106,6 +115,12 @@ public class PlayerHealth : NetworkBehaviour
         GetComponent<PlayerController>()?.SetInputEnabled(false);
     }
 
+    [ClientRpc]
+    void HidePlayerClientRpc()
+    {
+        gameObject.SetActive(false);
+    }
+
     // ── UI ────────────────────────────────────────────────────────────────
 
     void OnHealthChanged(int previous, int current)
@@ -118,12 +133,19 @@ public class PlayerHealth : NetworkBehaviour
 
     void UpdateHealthUI(int value)
     {
+        if (_healthBar != null)
+        {
+            _healthBar.minValue = 0;
+            _healthBar.maxValue = _maxHealth;
+            _healthBar.value    = value;
+        }
         if (_healthText != null)
-            _healthText.text = $"HP: {value}";
+            _healthText.text = $"{value}";
     }
 
     // ── Public accessor ───────────────────────────────────────────────────
 
-    public int PlayerSlot => _playerSlot;
-    public void SetPlayerSlot(int slot) => _playerSlot = slot;
+    public int  PlayerSlot                          => _playerSlot;
+    public void SetPlayerSlot(int slot)             => _playerSlot = slot;
+    public void SetHealthBarVisible(bool visible)   { if (_healthBarRoot != null) _healthBarRoot.SetActive(visible); }
 }

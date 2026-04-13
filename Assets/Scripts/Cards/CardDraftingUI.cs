@@ -29,14 +29,37 @@ public class CardDraftingUI : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
+        // Hide all health bars on every client when draft starts
+        HideHealthBarsClientRpc();
+
         if (!IsServer) return;
 
-        _eligibleSlots = GameManager.Instance.IsFirstDraft
-            ? new[] { 0, 1, 2 }
-            : GameManager.Instance.GetLosers(GameManager.Instance.LastRoundWinner);
+        int connected = NetworkManager.Singleton.ConnectedClientsIds.Count;
+
+        if (GameManager.Instance.IsFirstDraft)
+        {
+            // All connected players pick — no more than who's actually in the game
+            var slots = new System.Collections.Generic.List<int>();
+            for (int i = 0; i < connected; i++) slots.Add(i);
+            _eligibleSlots = slots.ToArray();
+        }
+        else
+        {
+            // Only losers pick — filter to slots that actually exist
+            var losers = GameManager.Instance.GetLosers(GameManager.Instance.LastRoundWinner);
+            var valid  = System.Array.FindAll(losers, s => s < connected);
+            _eligibleSlots = valid;
+        }
 
         _currentIndex = 0;
         DealNextPlayer();
+    }
+
+    [ClientRpc]
+    void HideHealthBarsClientRpc()
+    {
+        foreach (var ph in FindObjectsOfType<PlayerHealth>(true))
+            ph.SetHealthBarVisible(false);
     }
 
     // ── Server logic ──────────────────────────────────────────────────────
@@ -64,7 +87,6 @@ public class CardDraftingUI : NetworkBehaviour
         if (_statusText != null)
             _statusText.text = $"Player {draftingSlot + 1} is choosing...";
 
-        // Find the local player and either put them in draft mode or stand-by
         var localPlayerObj = NetworkManager.Singleton.LocalClient?.PlayerObject;
         if (localPlayerObj == null) return;
 
@@ -75,18 +97,27 @@ public class CardDraftingUI : NetworkBehaviour
 
         if (slot == draftingSlot)
         {
-            // Teleport the active drafter to the spawn point and show them
             if (_draftSpawn != null)
                 pc.rb.position = _draftSpawn.position;
             pc.gameObject.SetActive(true);
-            pc.SetDraftMode(true, _cardSlots, this);
+
+            // Short wait before enabling draft input so the scene settles
+            StartCoroutine(EnableDraftAfterDelay(pc));
         }
         else
         {
-            // Hide non-drafting players entirely until it's their turn
             pc.gameObject.SetActive(false);
             pc.SetDraftMode(false, null, null);
         }
+    }
+
+    System.Collections.IEnumerator EnableDraftAfterDelay(PlayerController pc)
+    {
+        // Disable input while scene settles, give player a moment to see the cards
+        pc.SetInputEnabled(false);
+        yield return new WaitForSeconds(1f);
+        pc.SetInputEnabled(true);
+        pc.SetDraftMode(true, _cardSlots, this);
     }
 
     // ── Pick submission — called by PlayerController ───────────────────────
@@ -123,6 +154,22 @@ public class CardDraftingUI : NetworkBehaviour
         var localPlayerObj = NetworkManager.Singleton.LocalClient?.PlayerObject;
         if (localPlayerObj != null)
             localPlayerObj.gameObject.SetActive(true);
+    }
+
+    // ── Hover sync ────────────────────────────────────────────────────────
+
+    /// <summary>Called by PlayerController when the hovered card changes. Pass -1 to clear.</summary>
+    [ServerRpc(RequireOwnership = false)]
+    public void UpdateHoverServerRpc(int cardIndex)
+    {
+        SyncHoverClientRpc(cardIndex);
+    }
+
+    [ClientRpc]
+    void SyncHoverClientRpc(int cardIndex)
+    {
+        for (int i = 0; i < _cardSlots.Length; i++)
+            _cardSlots[i].IsHovered = (i == cardIndex);
     }
 
     CardData GetCardData(int id) => CardDatabase.Instance.GetById((CardId)id);

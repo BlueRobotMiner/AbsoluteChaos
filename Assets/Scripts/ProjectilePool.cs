@@ -1,12 +1,14 @@
 using System.Collections.Generic;
+using Unity.Netcode;
 using UnityEngine;
 
 /// <summary>
-/// Object Pool pattern — reuses a fixed set of projectile GameObjects instead of
-/// Instantiate/Destroy per shot. Satisfies the "Additional Design Pattern" requirement.
-/// Place this on a persistent GameObject in the Map scenes (or on the NetworkManager GO).
+/// Object Pool pattern — reuses a fixed set of projectile GameObjects.
+/// Also acts as the network relay for broadcasting bullet hit positions to all clients,
+/// since Projectile is not a NetworkBehaviour and can't call ClientRpcs directly.
+/// Add a NetworkObject component to this GO in the scene.
 /// </summary>
-public class ProjectilePool : MonoBehaviour
+public class ProjectilePool : NetworkBehaviour
 {
     // ── Singleton ────────────────────────────────────────────────────────
 
@@ -15,7 +17,8 @@ public class ProjectilePool : MonoBehaviour
     // ── Inspector ────────────────────────────────────────────────────────
 
     [SerializeField] GameObject _projectilePrefab;
-    [SerializeField] int        _poolSize = 20;
+    public GameObject ProjectilePrefab => _projectilePrefab;
+    [SerializeField] int _poolSize = 20;
 
     // ── Pool ─────────────────────────────────────────────────────────────
 
@@ -25,13 +28,8 @@ public class ProjectilePool : MonoBehaviour
 
     void Awake()
     {
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
-
         WarmUp();
     }
 
@@ -47,10 +45,6 @@ public class ProjectilePool : MonoBehaviour
 
     // ── Pool API ──────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Returns an inactive projectile from the pool, activating it.
-    /// If the pool is empty a new instance is created as an overflow fallback.
-    /// </summary>
     public GameObject GetProjectile()
     {
         if (_pool.Count > 0)
@@ -59,19 +53,33 @@ public class ProjectilePool : MonoBehaviour
             obj.SetActive(true);
             return obj;
         }
-
-        // Overflow — create a new one rather than silently failing
-        Debug.LogWarning("[ProjectilePool] Pool exhausted — instantiating overflow projectile.");
+        Debug.LogWarning("[ProjectilePool] Pool exhausted — instantiating overflow.");
         return Instantiate(_projectilePrefab);
     }
 
-    /// <summary>
-    /// Returns a projectile to the pool. Called by Projectile itself on expiry or hit.
-    /// </summary>
     public void ReturnProjectile(GameObject proj)
     {
         proj.SetActive(false);
         proj.transform.SetParent(transform);
         _pool.Enqueue(proj);
+    }
+
+    // ── Hit sync ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by Projectile (server) when a bullet hits something.
+    /// Tells all non-server clients to remove the nearest visual bullet at that position.
+    /// </summary>
+    public void BroadcastHit(Vector2 hitPos)
+    {
+        if (IsServer)
+            NotifyHitClientRpc(hitPos);
+    }
+
+    [ClientRpc]
+    void NotifyHitClientRpc(Vector2 hitPos)
+    {
+        if (IsServer) return;   // server already handled it via the real projectile
+        BulletVisual.ReturnNearest(hitPos);
     }
 }

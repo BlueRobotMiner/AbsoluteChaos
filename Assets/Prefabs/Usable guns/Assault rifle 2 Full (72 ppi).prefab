@@ -25,8 +25,39 @@ Transform:
   m_GameObject: {fileID: 2415004136854558314}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -0.9369479, y: -0.10778866, z: 0}
+  m_LocalPosition: {x: -0.836, y: -0.169, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7025440768156012653}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2834026888184161378
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 228056418068836360}
+  m_Layer: 0
+  m_Name: FirePoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &228056418068836360
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2834026888184161378}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 4.119, y: 0.649, z: 0}
+  m_LocalScale: {x: 8.29158, y: 8.29158, z: 8.29158}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 7025440768156012653}
@@ -63,11 +94,12 @@ Transform:
   m_GameObject: {fileID: 8783214038525888682}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -6.032, y: -2.857, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 0.12060428, y: 0.12060428, z: 0.12060428}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 3238768624859877452}
+  - {fileID: 228056418068836360}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!212 &6392217510408978001
@@ -196,7 +228,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 1104908651
+  GlobalObjectIdHash: 2104133639
   InScenePlacedSourceGlobalObjectIdHash: 0
   AlwaysReplicateAsRoot: 1
   SynchronizeTransform: 0
@@ -218,6 +250,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _handAttachPoint: {fileID: 3238768624859877452}
+  _firePoint: {fileID: 228056418068836360}
 --- !u!114 &1047201989802433368
 MonoBehaviour:
   m_ObjectHideFlags: 0
