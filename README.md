@@ -77,7 +77,7 @@ Currently only tested with two people even though for the final roject it is sup
 2. Copy the generated Join Code  
 3. In the other instance, enter the code and click "Join"
 
-Here's how a generation you click host Create public it gives a code in the top left of the lobby screen you give that code to the second lay they enter that code when they hit join above join public and then it should connect them But if you're using this as in Unity Unreal you might not get it working. I believe for it work it would have to be a full build.
+4. Here's how a generation you click host Create public it gives a code in the top left of the lobby screen you give that code to the second lay they enter that code when they hit join above join public and then it should connect them But if you're using this as in Unity Unreal you might not get it working. I believe for it work it would have to be a full build.
 =======
 3. In the other instance, enter the code and click "Join"  
 
@@ -118,8 +118,7 @@ AbsoluteChaos/
 - Location: Assets/Scripts/Networking/NetworkInitializer.cs  
 - Description: Handles host/client setup and switches between Local IP and Unity Relay connections  
 
-<<<<<<< HEAD
-=======
+
 ## Known Issues
 
 - Combat system is partially implemented; Player 2 cannot shoot  
@@ -128,6 +127,7 @@ AbsoluteChaos/
 - Rematch system duplicates Player 1  
 - Player 2 UI does not update correctly on some maps  
 - Relay networking is not fully tested  
+
 ## Future Enhancements (Final Submission)
 
 - Implement working combat system for all players  
@@ -142,8 +142,6 @@ AbsoluteChaos/
 <<<<<<< HEAD
 - Unity 2022.3.62f3  
 - C#: Game engine  
-=======
-- Unity 6: Game engine  
 - Netcode for GameObjects: Multiplayer networking  
 - Unity Relay: Online connectivity  
 - SQLite (planned): Persistent data storage  
