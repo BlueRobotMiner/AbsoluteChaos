@@ -14,7 +14,14 @@ public class PlayerCombat : NetworkBehaviour
     [SerializeField] float      _bulletLifetime = 3f;    // must match Projectile._lifetime
     [SerializeField] GameObject _bulletVisualPrefab;     // assign your bullet prefab here
 
+    [Header("Punch (no gun)")]
+    [SerializeField] float _punchCooldown   = 0.5f;   // seconds between punches
+    [SerializeField] float _punchRange      = 1.2f;   // radius of hit detection sphere
+    [SerializeField] int   _punchDamage     = 20;     // HP removed per punch
+    [SerializeField] float _punchLunge      = 8f;     // forward impulse on the punching player
+
     float _nextFireTime;
+    float _nextPunchTime;
     Gun   _heldGun;
     bool  _shootingEnabled = true;
 
@@ -29,8 +36,44 @@ public class PlayerCombat : NetworkBehaviour
 
     // ── Public API ────────────────────────────────────────────────────────
 
-    public void SetHeldGun(Gun gun)            => _heldGun = gun;
-    public void SetShootingEnabled(bool value) => _shootingEnabled = value;
+    public void SetHeldGun(Gun gun)
+    {
+        _heldGun = gun;
+    }
+
+    /// <summary>
+    /// Called each Update to validate the held gun reference is still live.
+    /// Catches the case where the gun NetworkObject was despawned without
+    /// going through the normal ClearHolder path (e.g. scene transition).
+    /// </summary>
+    void ValidateHeldGun()
+    {
+        if (_heldGun != null && !_heldGun.IsSpawned)
+            _heldGun = null;
+    }
+
+    public void SetShootingEnabled(bool value)
+    {
+        _shootingEnabled = value;
+        // When re-enabling, push both timers forward so the card-pick click
+        // doesn't immediately fire or punch
+        if (value)
+        {
+            _nextFireTime  = Time.time + _fireRate;
+            _nextPunchTime = Time.time + _punchCooldown;
+        }
+    }
+
+    /// <summary>
+    /// Broadcasts shooting enable/disable to the owning client.
+    /// Call this from the server instead of SetShootingEnabled when you need it to reach the client.
+    /// </summary>
+    [ClientRpc]
+    public void SetShootingEnabledClientRpc(bool enabled)
+    {
+        if (!IsOwner) return;
+        SetShootingEnabled(enabled);
+    }
 
     // ── Update ────────────────────────────────────────────────────────────
 
@@ -38,13 +81,25 @@ public class PlayerCombat : NetworkBehaviour
     {
         if (!IsOwner) return;
 
-        if (_shootingEnabled && Input.GetMouseButton(0) && Time.time >= _nextFireTime)
+        ValidateHeldGun();
+
+        if (_shootingEnabled && Input.GetMouseButtonDown(0) && _heldGun == null
+            && Time.time >= _nextPunchTime)
         {
-            if (_heldGun == null)
+            // No gun — throw a punch toward mouse cursor
+            Vector2 punchDir = Vector2.right;
+            if (Camera.main != null)
             {
-                Debug.LogWarning("[PlayerCombat] No gun held.");
-                return;
+                Vector2 mouseWorld = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+                punchDir = (mouseWorld - (Vector2)transform.position).normalized;
             }
+            _nextPunchTime = Time.time + _punchCooldown;
+            PunchServerRpc(punchDir);
+        }
+
+        if (_shootingEnabled && Input.GetMouseButton(0) && _heldGun != null
+            && Time.time >= _nextFireTime)
+        {
             if (Camera.main == null)
             {
                 Debug.LogWarning("[PlayerCombat] Camera.main is null — tag the camera MainCamera.");
@@ -119,6 +174,30 @@ public class PlayerCombat : NetworkBehaviour
                 _heldGun = null;
                 return;
             }
+        }
+    }
+
+    [ServerRpc]
+    void PunchServerRpc(Vector2 punchDir)
+    {
+        // Lunge the punching player's body toward the mouse
+        var pc = GetComponent<PlayerController>();
+        if (pc != null && pc.rb != null)
+            pc.rb.AddForce(punchDir * _punchLunge, ForceMode2D.Impulse);
+
+        // Hit any enemy PlayerHealth within punch range
+        Vector2 punchOrigin = pc != null && pc.rb != null
+            ? pc.rb.position
+            : (Vector2)transform.position;
+
+        var hits = Physics2D.OverlapCircleAll(punchOrigin + punchDir * (_punchRange * 0.5f),
+                                              _punchRange * 0.5f);
+        foreach (var hit in hits)
+        {
+            var ph = hit.GetComponentInParent<PlayerHealth>();
+            if (ph == null) continue;
+            if (ph.NetworkObject == NetworkObject) continue;  // don't hit self
+            ph.TakeDamageServerRpc(_punchDamage);
         }
     }
 

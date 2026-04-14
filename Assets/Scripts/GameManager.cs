@@ -111,6 +111,30 @@ public class GameManager : MonoBehaviour
         OnPlayerEliminated?.Invoke(playerSlot);
     }
 
+    /// <summary>
+    /// Called on non-server clients via ClientRpc to mirror the server's round-end state.
+    /// Updates local scores and fires OnRoundEnd so client-side UI (RoundProgressUI, etc.) refreshes.
+    /// </summary>
+    public void ClientSyncRoundEnd(int[] scores, int winnerSlot)
+    {
+        for (int i = 0; i < scores.Length && i < PlayerScores.Length; i++)
+            PlayerScores[i] = scores[i];
+        LastRoundWinner = winnerSlot;
+        IsFirstDraft    = false;
+        OnRoundEnd?.Invoke(winnerSlot);
+    }
+
+    /// <summary>
+    /// Called on non-server clients via ClientRpc to mirror a match-end state.
+    /// </summary>
+    public void ClientSyncMatchEnd(int[] scores, int winnerSlot)
+    {
+        for (int i = 0; i < scores.Length && i < PlayerScores.Length; i++)
+            PlayerScores[i] = scores[i];
+        LastRoundWinner = winnerSlot;
+        OnMatchEnd?.Invoke(winnerSlot);
+    }
+
     /// <summary>Returns player slots that are NOT the round winner — these players draft next.</summary>
     public int[] GetLosers(int winnerSlot) =>
         Enumerable.Range(0, 3).Where(i => i != winnerSlot).ToArray();

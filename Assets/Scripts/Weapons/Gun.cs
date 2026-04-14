@@ -6,22 +6,25 @@ using UnityEngine;
 
 public class Gun : NetworkBehaviour
 {
-    [SerializeField] Transform _handAttachPoint;
-    [SerializeField] Transform _firePoint;        // muzzle — set per-gun in the prefab
-    [SerializeField] float     _throwForce = 10f;
+    [SerializeField] Transform  _handAttachPoint;
+    [SerializeField] Transform  _firePoint;
+    [SerializeField] float      _throwForce  = 10f;
+    [SerializeField] LayerMask  _groundLayer;   // set this to your Ground layer in the Inspector
 
     // Server-authoritative state — all clients read these
     NetworkVariable<bool>  _networkHeld     = new(false,  NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     NetworkVariable<ulong> _holderNetObjId  = new(0,      NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    Rigidbody2D     _rb;
+    Rigidbody2D      _rb;
     NetworkTransform _netTransform;
-    bool            _landed;
+    Collider2D[]     _allColliders;   // cached — avoids GetComponent in hot paths
+    bool             _landed;
 
     void Awake()
     {
         _rb           = GetComponent<Rigidbody2D>();
         _netTransform = GetComponent<NetworkTransform>();
+        _allColliders = GetComponents<Collider2D>();
     }
 
     public override void OnNetworkSpawn()
@@ -35,24 +38,24 @@ public class Gun : NetworkBehaviour
     }
 
 
-    // ── Physics landing (server only) ──────────────────────────────────
+    // ── Physics landing — solid collider hits ground ───────────────────
+
+    void OnCollisionEnter2D(Collision2D col)
+    {
+        if (!IsServer || _landed || _networkHeld.Value) return;
+        if ((_groundLayer.value & (1 << col.gameObject.layer)) == 0) return;
+
+        _landed             = true;
+        _rb.velocity        = Vector2.zero;
+        _rb.angularVelocity = 0f;
+        _rb.isKinematic     = true;
+    }
+
+    // ── Pickup — trigger collider overlaps player ──────────────────────
 
     void OnTriggerEnter2D(Collider2D col)
     {
-        if (!IsServer) return;
-
-        // Land on ground
-        if (!_landed && col.gameObject.layer == LayerMask.NameToLayer("Ground"))
-        {
-            _landed = true;
-            _rb.velocity        = Vector2.zero;
-            _rb.angularVelocity = 0f;
-            _rb.isKinematic     = true;
-            return;
-        }
-
-        // Pickup attempt — player walks into trigger
-        if (_networkHeld.Value) return;
+        if (!IsServer || _networkHeld.Value) return;
         PlayerController pc = col.GetComponentInParent<PlayerController>();
         if (pc == null) return;
         DoPickup(pc);
@@ -60,6 +63,14 @@ public class Gun : NetworkBehaviour
 
     void DoPickup(PlayerController pc)
     {
+        // Block pickup if this player already holds any other gun —
+        // they must throw first before picking up a new one
+        foreach (var other in FindObjectsOfType<Gun>())
+        {
+            if (other != this && other.IsHeldBy(pc.NetworkObjectId))
+                return;
+        }
+
         // Server sets state — NetworkVariables push to all clients automatically
         _networkHeld.Value    = true;
         _holderNetObjId.Value = pc.NetworkObjectId;
@@ -70,8 +81,7 @@ public class Gun : NetworkBehaviour
         // Disable NetworkTransform — gun will just follow the hand each frame
         if (_netTransform != null) _netTransform.enabled = false;
 
-        var col = GetComponent<Collider2D>();
-        if (col != null) col.enabled = false;
+        foreach (var col in _allColliders) col.enabled = false;
 
         // Tell owner's ArmAimController about the gun sprite
         NotifyOwnerPickupClientRpc(pc.OwnerClientId);
@@ -152,8 +162,7 @@ public class Gun : NetworkBehaviour
         }
         if (_netTransform != null) _netTransform.enabled = false;
 
-        var col = GetComponent<Collider2D>();
-        if (col != null) col.enabled = false;
+        foreach (var col in _allColliders) col.enabled = false;
     }
 
     Transform GetHolderHand(ulong holderNetObjId)
@@ -183,9 +192,8 @@ public class Gun : NetworkBehaviour
         _rb.velocity        = throwDir * _throwForce;
         _rb.angularVelocity = UnityEngine.Random.Range(-200f, 200f);
 
-        // Re-enable collider so it can land and be picked up again
-        var col = GetComponent<Collider2D>();
-        if (col != null) col.enabled = true;
+        // Re-enable all colliders so the gun can land and be picked up again
+        foreach (var col in _allColliders) col.enabled = true;
 
         // Re-enable NetworkTransform so thrown arc syncs to all clients
         if (_netTransform != null) _netTransform.enabled = true;

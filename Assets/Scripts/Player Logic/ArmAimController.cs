@@ -73,15 +73,19 @@ public class ArmAimController : MonoBehaviour
         float aimAngle   = _serverAimAngle;
         bool  crossedBody = Mathf.Abs(aimAngle) > 90f;
 
-        // Right hand follows aim smoothly
-        _handRb.MoveRotation(Mathf.LerpAngle(
-            _handRb.rotation, aimAngle, _handSpeed * Time.fixedDeltaTime));
-
-        // Right arm + wrist snap to aim when holding gun
+        // Right arm, wrist, and hand all track aim at all times.
+        // When holding a gun snap precisely; otherwise lerp smoothly.
         if (_holdingGun)
         {
             if (_armRb   != null) _armRb.MoveRotation(aimAngle);
             if (_wristRb != null) _wristRb.MoveRotation(aimAngle);
+            _handRb.MoveRotation(aimAngle);
+        }
+        else
+        {
+            if (_armRb   != null) _armRb.MoveRotation(Mathf.LerpAngle(_armRb.rotation,   aimAngle, _handSpeed * Time.fixedDeltaTime));
+            if (_wristRb != null) _wristRb.MoveRotation(Mathf.LerpAngle(_wristRb.rotation, aimAngle, _handSpeed * Time.fixedDeltaTime));
+            _handRb.MoveRotation(Mathf.LerpAngle(_handRb.rotation, aimAngle, _handSpeed * Time.fixedDeltaTime));
         }
 
         // Left arm spawns in T-pose pointing left (180° offset from right arm),

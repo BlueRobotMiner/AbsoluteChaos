@@ -40,11 +40,11 @@ public class KillBox : MonoBehaviour
                 int damage = Mathf.RoundToInt(_baseDamage * state.multiplier);
                 ph.TakeDamageServerRpc(damage);
 
-                // Grow multiplier each tick, capped
-                state.multiplier = Mathf.Min(state.multiplier + _multiplierGrowth, _maxMultiplier);
+                // Apply knockback scaled to current multiplier — longer exposure = harder push
+                ApplyKnockback(ph, state.multiplier);
 
-                // Keep knocking them back every tick too
-                ApplyKnockback(ph);
+                // Grow multiplier each tick AFTER applying so first hit uses base values
+                state.multiplier = Mathf.Min(state.multiplier + _multiplierGrowth, _maxMultiplier);
             }
         }
 
@@ -58,7 +58,7 @@ public class KillBox : MonoBehaviour
         if (ph == null || _active.ContainsKey(ph)) return;
 
         _active[ph] = new KillBoxState { multiplier = 1f, timer = _tickRate }; // hit immediately on entry
-        ApplyKnockback(ph);
+        ApplyKnockback(ph, 1f);
     }
 
     void OnTriggerExit2D(Collider2D col)
@@ -68,17 +68,26 @@ public class KillBox : MonoBehaviour
             _active.Remove(ph);  // multiplier resets on exit
     }
 
-    void ApplyKnockback(PlayerHealth ph)
+    void ApplyKnockback(PlayerHealth ph, float multiplier)
     {
-        // Push toward map center (0,0) from wherever the killbox is
         var pc = ph.GetComponent<PlayerController>();
         if (pc == null || pc.rb == null) return;
 
-        Vector2 direction = ((Vector2)Vector3.zero - pc.rb.position).normalized;
-        // Always push horizontally inward + a bit up so they can recover
-        direction = new Vector2(direction.x, 0.5f).normalized;
-        pc.rb.velocity = Vector2.zero;
-        pc.rb.AddForce(direction * _knockbackForce, ForceMode2D.Impulse);
+        Vector2 toCenter = (Vector2)Vector3.zero - pc.rb.position;
+
+        // Always push inward horizontally. For the vertical component: use the actual
+        // direction to center but clamp the Y to at least 1.5 so bottom killboxes
+        // always launch players upward rather than just sideways.
+        float yDir    = Mathf.Max(toCenter.normalized.y, 1.5f);
+        Vector2 dir   = new Vector2(toCenter.x != 0 ? Mathf.Sign(toCenter.x) : 0f, yDir).normalized;
+
+        float force   = _knockbackForce * multiplier;
+
+        // Suppress duration scales with multiplier so high-multiplier hits give
+        // the player longer to recover before movement input overrides the impulse
+        float suppress = Mathf.Lerp(0.25f, 0.65f, (multiplier - 1f) / Mathf.Max(_maxMultiplier - 1f, 1f));
+
+        pc.ApplyKnockback(dir * force, suppress);
     }
 }
 

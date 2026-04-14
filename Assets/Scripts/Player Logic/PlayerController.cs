@@ -87,6 +87,9 @@ public class PlayerController : NetworkBehaviour
     int _jumpBufferFrames;
     const int JumpBufferMax = 6;
 
+    // Knockback suppression — prevents HandleMove from overwriting external impulses
+    bool _suppressHorizontal;
+
     // Draft mode
     bool           _draftMode;
     CardSlot[]     _draftCards;
@@ -138,6 +141,12 @@ public class PlayerController : NetworkBehaviour
             Cursor.lockState = CursorLockMode.Confined;
             Cursor.visible   = true;
         }
+
+        // Clear stale input carried over from the previous scene
+        _pendingH         = 0f;
+        _pendingJump      = false;
+        _lastSentH        = 0f;
+        _suppressHorizontal = false;
     }
 
     System.Collections.IEnumerator UnlockPhysicsAfterSync()
@@ -194,6 +203,8 @@ public class PlayerController : NetworkBehaviour
 
     // ── Update — input capture only, no physics ────────────────────────────
 
+    bool _wasFocused = true;
+
     void Update()
     {
         if (!IsSpawned) return;
@@ -202,8 +213,21 @@ public class PlayerController : NetworkBehaviour
         if (!IsServer)
             ApplySyncedAnimation(_syncedAnimDir.Value);
 
+        // When the window loses focus, zero out buffered input so the player stops moving
+        bool focused = Application.isFocused;
+        if (IsOwner && _wasFocused && !focused)
+        {
+            if (IsServer)
+                _pendingH = 0f;
+            else
+                SendInputServerRpc(0f, false, _lastSentAim);
+
+            _lastSentH = 0f;
+        }
+        _wasFocused = focused;
+
         // Only the owner captures input
-        if (!IsOwner || !_inputEnabled || !Application.isFocused) return;
+        if (!IsOwner || !_inputEnabled || !focused) return;
         if (_draftMode) { HandleDraftInput(); return; }
 
         float h    = Input.GetAxisRaw("Horizontal");
@@ -353,7 +377,7 @@ public class PlayerController : NetworkBehaviour
         CardSlot nearest    = null;
         int      nearestIdx = -1;
 
-        Camera uiCam = Camera.main;   // Screen Space - Camera mode
+        Camera uiCam = Camera.main;
 
         for (int i = 0; i < _draftCards.Length; i++)
         {
@@ -398,9 +422,11 @@ public class PlayerController : NetworkBehaviour
         // ── Right click to select hovered card ──────────────────────────
         if (Input.GetMouseButtonDown(0) && _hoveredDraftCard != null && _draftManager != null)
         {
-            _draftMode = false;
-            _draftManager.UpdateHoverServerRpc(-1);   // clear hover on all screens
-            _draftManager.SubmitPickServerRpc(GetPlayerSlotPublic(), (int)_hoveredDraftCard.CardId);
+            var picked   = _hoveredDraftCard;
+            var manager  = _draftManager;             // save before SetDraftMode nulls it
+            SetDraftMode(false, null, null);          // re-enables shooting, clears refs
+            manager.UpdateHoverServerRpc(-1);
+            manager.SubmitPickServerRpc(GetPlayerSlotPublic(), (int)picked.CardId);
         }
     }
 
@@ -410,9 +436,11 @@ public class PlayerController : NetworkBehaviour
     {
         if (rb == null) return;
 
-        if (h != 0)
-            rb.MovePosition(rb.position + Vector2.right * (h * speed * Time.fixedDeltaTime));
+        if (h != 0 && !_suppressHorizontal)
+            // Set horizontal velocity only — preserve rb.velocity.y so gravity and jump are unaffected
+            rb.velocity = new Vector2(h * speed, rb.velocity.y);
         else
+            // Stopping drag — bleeds off horizontal momentum, vertical untouched
             rb.velocity = new Vector2(
                 rb.velocity.x * (1f - stoppingDrag * Time.fixedDeltaTime),
                 rb.velocity.y);
@@ -486,6 +514,9 @@ public class PlayerController : NetworkBehaviour
 
     int GetPlayerSlot()
     {
+        // OwnerClientId is set at spawn time and available on all clients.
+        // NGO assigns IDs incrementally (host = 0, first client = 1, etc.) and
+        // ConnectedClientsIds preserves insertion order, so the index is stable.
         int i = 0;
         foreach (ulong id in NetworkManager.Singleton.ConnectedClientsIds)
         {
@@ -499,5 +530,35 @@ public class PlayerController : NetworkBehaviour
     {
         _inputEnabled = enabled;
         if (!enabled && rb != null) rb.velocity = Vector2.zero;
+    }
+
+    /// <summary>
+    /// Broadcasts input enable/disable to the owning client so their input gate stays in sync.
+    /// Call this from the server instead of SetInputEnabled when you need it to reach the client.
+    /// </summary>
+    [ClientRpc]
+    public void SetInputEnabledClientRpc(bool enabled)
+    {
+        if (!IsOwner) return;
+        SetInputEnabled(enabled);
+    }
+
+    /// <summary>
+    /// Called by KillBox (server only). Applies an impulse and suppresses horizontal
+    /// input for a short window so HandleMove can't immediately cancel the knockback.
+    /// </summary>
+    public void ApplyKnockback(Vector2 force, float suppressDuration = 0.35f)
+    {
+        if (rb == null) return;
+        rb.velocity = new Vector2(0f, rb.velocity.y);   // clear horizontal so impulse isn't fighting it
+        rb.AddForce(force, ForceMode2D.Impulse);
+        StartCoroutine(KnockbackSuppressCoroutine(suppressDuration));
+    }
+
+    System.Collections.IEnumerator KnockbackSuppressCoroutine(float duration)
+    {
+        _suppressHorizontal = true;
+        yield return new WaitForSeconds(duration);
+        _suppressHorizontal = false;
     }
 }

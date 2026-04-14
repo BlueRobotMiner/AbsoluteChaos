@@ -145,7 +145,13 @@ public class PlayerHealth : NetworkBehaviour
 
     // ── Public accessor ───────────────────────────────────────────────────
 
-    public int  PlayerSlot                          => _playerSlot;
-    public void SetPlayerSlot(int slot)             => _playerSlot = slot;
-    public void SetHealthBarVisible(bool visible)   { if (_healthBarRoot != null) _healthBarRoot.SetActive(visible); }
+    public int  PlayerSlot                        => _playerSlot;
+    public void SetPlayerSlot(int slot)           => _playerSlot = slot;
+    public void SetHealthBarVisible(bool visible)
+    {
+        if (_healthBarRoot != null) _healthBarRoot.SetActive(visible);
+        // Force-refresh text and bar when showing — OnValueChanged won't fire if
+        // health hasn't changed since last map, so the UI would stay stale otherwise
+        if (visible) UpdateHealthUI(Health.Value);
+    }
 }

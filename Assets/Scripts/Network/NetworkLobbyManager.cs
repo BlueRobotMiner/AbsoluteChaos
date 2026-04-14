@@ -157,10 +157,22 @@ public class NetworkLobbyManager : NetworkBehaviour
         // Brief pause so players can see the kill before the scene changes
         yield return new WaitForSeconds(1.5f);
 
+        // Despawn all guns before leaving — dynamically spawned NetworkObjects survive
+        // scene transitions (NGO puts them in DontDestroyOnLoad), so we must clean up
+        // explicitly or the gun will still exist when the next map spawns a fresh one
+        DespawnAllGuns();
+        yield return null;   // one frame for despawn RPCs to reach clients before scene swap
+
         if (GameManager.Instance != null)
             GameManager.Instance.IsFirstDraft = true;
 
         NetworkManager.Singleton.SceneManager.LoadScene("CardDraft", UnityEngine.SceneManagement.LoadSceneMode.Single);
+    }
+
+    void DespawnAllGuns()
+    {
+        foreach (var gun in FindObjectsOfType<Gun>(true))
+            if (gun.IsSpawned) gun.DespawnSelf();
     }
 
     // ── Public API ───────────────────────────────────────────────────────

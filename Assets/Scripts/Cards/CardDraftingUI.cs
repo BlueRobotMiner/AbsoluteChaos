@@ -67,6 +67,22 @@ public class CardDraftingUI : NetworkBehaviour
     void DealNextPlayer()
     {
         int draftingSlot = _eligibleSlots[_currentIndex];
+
+        // Find the drafting player and move them to the draft spawn point server-side.
+        // InitializePositionClientRpc shifts all ragdoll bodies and snapshots to clients.
+        PlayerController draftingPC = null;
+        foreach (var pc in FindObjectsOfType<PlayerController>(true))
+        {
+            if (pc.GetPlayerSlotPublic() == draftingSlot)
+            {
+                draftingPC = pc;
+                break;
+            }
+        }
+
+        if (draftingPC != null && _draftSpawn != null)
+            draftingPC.InitializePositionClientRpc((Vector2)_draftSpawn.position);
+
         CardData[] offered = CardDatabase.Instance.GetRandomCards(3);
         DealCardsClientRpc(draftingSlot, (int)offered[0].id, (int)offered[1].id, (int)offered[2].id);
     }
@@ -76,7 +92,7 @@ public class CardDraftingUI : NetworkBehaviour
     [ClientRpc]
     void DealCardsClientRpc(int draftingSlot, int card0, int card1, int card2)
     {
-        // Set up the card visuals — look up full CardData from database
+        // Set up the card visuals
         _cardSlots[0].Setup(GetCardData(card0));
         _cardSlots[1].Setup(GetCardData(card1));
         _cardSlots[2].Setup(GetCardData(card2));
@@ -87,27 +103,34 @@ public class CardDraftingUI : NetworkBehaviour
         if (_statusText != null)
             _statusText.text = $"Player {draftingSlot + 1} is choosing...";
 
+        // Ensure health bars stay hidden every time a drafter is shown
+        foreach (var ph in FindObjectsOfType<PlayerHealth>(true))
+            ph.SetHealthBarVisible(false);
+
+        // Show the drafter on ALL clients, hide everyone else.
+        // This runs identically on every machine so visibility stays in sync.
+        foreach (var pc in FindObjectsOfType<PlayerController>(true))
+        {
+            int slot = pc.GetPlayerSlotPublic();
+            pc.gameObject.SetActive(slot == draftingSlot);
+        }
+
+        // Drive input mode for the LOCAL player only
         var localPlayerObj = NetworkManager.Singleton.LocalClient?.PlayerObject;
         if (localPlayerObj == null) return;
 
-        var pc = localPlayerObj.GetComponent<PlayerController>();
-        if (pc == null) return;
+        var localPC = localPlayerObj.GetComponent<PlayerController>();
+        if (localPC == null) return;
 
-        int slot = pc.GetPlayerSlotPublic();
+        int localSlot = localPC.GetPlayerSlotPublic();
 
-        if (slot == draftingSlot)
+        if (localSlot == draftingSlot)
         {
-            if (_draftSpawn != null)
-                pc.rb.position = _draftSpawn.position;
-            pc.gameObject.SetActive(true);
-
-            // Short wait before enabling draft input so the scene settles
-            StartCoroutine(EnableDraftAfterDelay(pc));
+            StartCoroutine(EnableDraftAfterDelay(localPC));
         }
         else
         {
-            pc.gameObject.SetActive(false);
-            pc.SetDraftMode(false, null, null);
+            localPC.SetDraftMode(false, null, null);
         }
     }
 

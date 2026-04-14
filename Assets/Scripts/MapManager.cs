@@ -45,12 +45,13 @@ public class MapManager : NetworkBehaviour
 
     void RespawnAllPlayers()
     {
-        // Restore health bars hidden during draft
+        // Show health bars on ALL clients (SetHealthBarVisible is not a ClientRpc,
+        // so we broadcast it explicitly)
+        ShowHealthBarsClientRpc();
+
+        // Reset health server-side — NetworkVariable pushes the new value to all clients
         foreach (var ph in FindObjectsOfType<PlayerHealth>(true))
-        {
-            ph.SetHealthBarVisible(true);
             ph.ResetHealth();
-        }
 
         // includeInactive = true so we find players who were hidden on death
         var players = FindObjectsOfType<PlayerController>(true);
@@ -62,8 +63,11 @@ public class MapManager : NetworkBehaviour
             // Re-show on all clients before doing anything else
             ShowPlayerClientRpc(pc.GetComponent<NetworkObject>().NetworkObjectId);
 
-            // Re-enable input
-            pc.SetInputEnabled(true);
+            // Re-enable input and shooting on the owning client (plain SetInputEnabled
+            // only runs server-side and won't reach Player 2's input gate)
+            pc.SetInputEnabledClientRpc(true);
+            if (pc.TryGetComponent(out PlayerCombat combat))
+                combat.SetShootingEnabledClientRpc(true);
 
             // Use per-slot spawn point if available, otherwise fall back in order
             Vector2 pos;
@@ -98,12 +102,41 @@ public class MapManager : NetworkBehaviour
             netObj.gameObject.SetActive(true);
     }
 
+    [ClientRpc]
+    void ShowHealthBarsClientRpc()
+    {
+        foreach (var ph in FindObjectsOfType<PlayerHealth>(true))
+            ph.SetHealthBarVisible(true);
+    }
+
     // ── Round end ─────────────────────────────────────────────────────────
 
     void HandleRoundEnd(int winnerSlot)
     {
         SavePlayerPositions();
+        // Sync scores to all clients so their RoundProgressUI refreshes
+        SyncRoundEndClientRpc(GameManager.Instance.PlayerScores, winnerSlot);
         StartCoroutine(LoadCardDraft());
+    }
+
+    [ClientRpc]
+    void SyncRoundEndClientRpc(int[] scores, int winnerSlot)
+    {
+        if (IsServer) return;   // server already updated by AddRoundWin
+        GameManager.Instance?.ClientSyncRoundEnd(scores, winnerSlot);
+    }
+
+    void HandleMatchEnd(int winnerSlot)
+    {
+        SyncMatchEndClientRpc(GameManager.Instance.PlayerScores, winnerSlot);
+        StartCoroutine(LoadResults(winnerSlot));
+    }
+
+    [ClientRpc]
+    void SyncMatchEndClientRpc(int[] scores, int winnerSlot)
+    {
+        if (IsServer) return;
+        GameManager.Instance?.ClientSyncMatchEnd(scores, winnerSlot);
     }
 
     void SavePlayerPositions()
@@ -121,15 +154,18 @@ public class MapManager : NetworkBehaviour
         GameManager.Instance.SavePlayerPositions(positions);
     }
 
-    void HandleMatchEnd(int winnerSlot)
-    {
-        StartCoroutine(LoadResults(winnerSlot));
-    }
-
     IEnumerator LoadCardDraft()
     {
         yield return new WaitForSeconds(_roundEndDelay);
+        DespawnAllGuns();
+        yield return null;   // one frame for despawn RPCs to reach clients before scene swap
         NetworkManager.Singleton.SceneManager.LoadScene("CardDraft", LoadSceneMode.Single);
+    }
+
+    void DespawnAllGuns()
+    {
+        foreach (var gun in FindObjectsOfType<Gun>(true))
+            if (gun.IsSpawned) gun.DespawnSelf();
     }
 
     IEnumerator LoadResults(int winnerSlot)
