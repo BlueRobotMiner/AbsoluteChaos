@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(del \"c:\\\\Users\\\\buler\\\\AbsoluteChaos\\\\Assets\\\\Scripts\\\\Cards\\\\CardHUDIcon.cs\")"
     ]
   }
 }

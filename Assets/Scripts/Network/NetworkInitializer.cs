@@ -177,20 +177,33 @@ public class NetworkInitializer : MonoBehaviour
 
     void Start()
     {
-        NetworkManager.Singleton.OnTransportFailure += HandleTransportFailure;
+        if (NetworkManager.Singleton == null) return;
+        NetworkManager.Singleton.OnTransportFailure         += HandleTransportFailure;
+        NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnect;
     }
 
     void OnDestroy()
     {
-        if (NetworkManager.Singleton != null)
-            NetworkManager.Singleton.OnTransportFailure -= HandleTransportFailure;
+        if (NetworkManager.Singleton == null) return;
+        NetworkManager.Singleton.OnTransportFailure         -= HandleTransportFailure;
+        NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnect;
     }
 
-    private void HandleTransportFailure()
+    void HandleTransportFailure()
     {
         Debug.LogError("[NetworkInitializer] Transport failure.");
         OnNetworkError?.Invoke("Connection lost.");
         Disconnect();
+    }
+
+    void HandleClientDisconnect(ulong clientId)
+    {
+        // On the server this fires when OTHER clients leave — ignore it.
+        // On a pure client it fires when WE lose connection to the host.
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer) return;
+
+        Debug.Log("[NetworkInitializer] Lost connection to host — returning to MainMenu.");
+        Disconnect();   // Shutdown + LoadScene("MainMenu") — has IsListening guard so safe to call multiple times
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────

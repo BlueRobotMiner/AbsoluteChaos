@@ -45,31 +45,11 @@ public class GameManager : MonoBehaviour
     /// <summary>True after the lobby first-kill; false after that (losers-only drafts).</summary>
     public bool IsFirstDraft { get; set; } = true;
 
-    // ── Saved spawn positions — written by MapManager before draft, read on return ──
-
     /// <summary>
-    /// Per-slot spawn positions saved just before loading CardDraft.
-    /// MapManager fills these so each player's character walks out from a
-    /// meaningful starting point when the map reloads.
+    /// True only while a map scene is active (MapManager sets/clears this).
+    /// Prevents lobby kills from counting as round wins.
     /// </summary>
-    public Vector2[] SavedSpawnPositions { get; } = new Vector2[3];
-
-    /// <summary>True when SavedSpawnPositions holds valid data from the current session.</summary>
-    public bool HasSavedPositions { get; private set; }
-
-    /// <summary>
-    /// Called by MapManager before loading the draft scene.
-    /// Saves the world position of every connected player indexed by slot.
-    /// </summary>
-    public void SavePlayerPositions(Vector2[] positions)
-    {
-        for (int i = 0; i < positions.Length && i < SavedSpawnPositions.Length; i++)
-            SavedSpawnPositions[i] = positions[i];
-        HasSavedPositions = true;
-    }
-
-    /// <summary>Clears the saved positions so the next map uses its own spawn points.</summary>
-    public void ClearSavedPositions() => HasSavedPositions = false;
+    public bool RoundsActive { get; set; } = false;
 
     // ── Map ───────────────────────────────────────────────────────────────
 
@@ -149,6 +129,7 @@ public class GameManager : MonoBehaviour
             stack.Clear();
         IsFirstDraft    = true;
         LastRoundWinner = -1;
+        RoundsActive    = false;
     }
 }
 

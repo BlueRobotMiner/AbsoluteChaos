@@ -21,23 +21,42 @@ public class PlayerHealth : NetworkBehaviour
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server);
 
-    // Tracks player slot (0/1/2) — set by the spawning logic or in Inspector
+    // Alive state — server writes, all clients read. Toggling renderers via NV avoids
+    // calling SetActive on the root NetworkObject GO, which causes NGO to destroy it.
+    NetworkVariable<bool> _networkAlive = new NetworkVariable<bool>(
+        true,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    public bool IsAlive => _networkAlive.Value;
+
     [SerializeField] int _playerSlot = 0;
+
+    // Fragile card: incoming damage is scaled by this (default 1 = no modifier)
+    float _incomingDamageMultiplier = 1f;
+
+    // Spawn immunity: set by MapManager at respawn so killbox doesn't hit during physics settle
+    float _immunityEndTime;
 
     // ── NGO ───────────────────────────────────────────────────────────────
 
     public override void OnNetworkSpawn()
     {
-        Health.OnValueChanged += OnHealthChanged;
+        Health.OnValueChanged        += OnHealthChanged;
+        _networkAlive.OnValueChanged += OnAliveChanged;
 
-        // Server sets the canonical starting value — all clients see it via OnValueChanged
         if (IsServer) Health.Value = _maxHealth;
         else          UpdateHealthUI(Health.Value);
+
+        // Apply current state immediately — NV callbacks don't fire for the initial value,
+        // so late-joining clients need this to see dead players correctly on join
+        ApplyAliveState(_networkAlive.Value);
     }
 
     public override void OnNetworkDespawn()
     {
-        Health.OnValueChanged -= OnHealthChanged;
+        Health.OnValueChanged        -= OnHealthChanged;
+        _networkAlive.OnValueChanged -= OnAliveChanged;
     }
 
     // ── Damage ────────────────────────────────────────────────────────────
@@ -46,64 +65,108 @@ public class PlayerHealth : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     public void TakeDamageServerRpc(int damage)
     {
-        if (Health.Value <= 0) return;   // already eliminated
+        if (Health.Value <= 0) return;
+        if (Time.time < _immunityEndTime) return;
 
-        Health.Value = Mathf.Max(0, Health.Value - damage);
+        int scaled = Mathf.RoundToInt(damage * _incomingDamageMultiplier);
+        Health.Value = Mathf.Max(0, Health.Value - scaled);
 
         if (Health.Value == 0)
             Eliminate();
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void HealServerRpc(int amount)
+    {
+        if (Health.Value <= 0) return;
+        Health.Value = Mathf.Min(_maxHealth, Health.Value + amount);
     }
 
     // ── Elimination ───────────────────────────────────────────────────────
 
     void Eliminate()
     {
-        // Fire the delegate so AudioManager, HUD, etc. can react
         GameManager.Instance?.NotifyPlayerEliminated(_playerSlot);
 
-        // Tell the lobby manager a kill happened (for the first-kill game-start trigger)
         var lobbyManager = FindObjectOfType<NetworkLobbyManager>(true);
         if (lobbyManager != null)
             lobbyManager.NotifyKill();
         else
             Debug.Log("[PlayerHealth] NetworkLobbyManager not found — probably not in Lobby scene.");
 
-        // Disable input and hide the player on every client
+        _networkAlive.Value = false;   // fires OnAliveChanged on all clients — hides renderers
         DisableInputClientRpc();
-        HidePlayerClientRpc();
 
-        // Check if only one player remains alive
         CheckRoundEnd();
     }
 
     void CheckRoundEnd()
     {
-        // Only active GOs are alive — dead players are hidden (SetActive false)
-        // includeInactive = true so we can count total players, but filter by active
         PlayerHealth[] allPlayers = FindObjectsOfType<PlayerHealth>(true);
         int aliveCount = 0;
         int winnerSlot = -1;
 
         foreach (var ph in allPlayers)
         {
-            if (ph.gameObject.activeSelf)
+            if (ph._networkAlive.Value)
             {
                 aliveCount++;
                 winnerSlot = ph._playerSlot;
             }
         }
 
-        if (aliveCount == 1 && winnerSlot >= 0)
+        if (aliveCount == 1 && winnerSlot >= 0 && (GameManager.Instance?.RoundsActive ?? false))
             GameManager.Instance?.AddRoundWin(winnerSlot);
     }
 
-    // ── Reset ─────────────────────────────────────────────────────────────
+    // ── Alive / reset API (server only) ──────────────────────────────────
+
+    /// <summary>Brings this player back to life at the start of each round.</summary>
+    public void SetAlive(bool alive)
+    {
+        if (!IsServer) return;
+        _networkAlive.Value = alive;
+        // NV OnValueChanged only fires when the value changes — force-broadcast so the
+        // health bar always appears even if the player was never dead (NV stays true).
+        ForceApplyAliveClientRpc(alive);
+    }
+
+    [ClientRpc]
+    void ForceApplyAliveClientRpc(bool alive) => ApplyAliveState(alive);
+
+    /// <summary>
+    /// Restores SpriteRenderers only — used by CardDraft to make dead players visible
+    /// without touching health bars or alive state.
+    /// </summary>
+    public void ShowRenderersForDraft()
+    {
+        if (!IsServer) return;
+        ShowRenderersForDraftClientRpc();
+    }
+
+    [ClientRpc]
+    void ShowRenderersForDraftClientRpc()
+    {
+        foreach (var sr in GetComponentsInChildren<SpriteRenderer>(true))
+            sr.enabled = true;
+    }
 
     /// <summary>Called at the start of each new round (server only).</summary>
     public void ResetHealth()
     {
         if (!IsServer) return;
         Health.Value = _maxHealth;
+    }
+
+    // ── NetworkVariable callback ──────────────────────────────────────────
+
+    void OnAliveChanged(bool prev, bool current) => ApplyAliveState(current);
+
+    void ApplyAliveState(bool alive)
+    {
+        foreach (var sr in GetComponentsInChildren<SpriteRenderer>(true))
+            sr.enabled = alive;
+        SetHealthBarVisible(alive);
     }
 
     // ── ClientRpcs ────────────────────────────────────────────────────────
@@ -115,20 +178,11 @@ public class PlayerHealth : NetworkBehaviour
         GetComponent<PlayerController>()?.SetInputEnabled(false);
     }
 
-    [ClientRpc]
-    void HidePlayerClientRpc()
-    {
-        gameObject.SetActive(false);
-    }
-
     // ── UI ────────────────────────────────────────────────────────────────
 
     void OnHealthChanged(int previous, int current)
     {
         UpdateHealthUI(current);
-
-        if (AudioManager.Instance != null && current < previous)
-            AudioManager.Instance.PlayHitSFX();
     }
 
     void UpdateHealthUI(int value)
@@ -147,6 +201,11 @@ public class PlayerHealth : NetworkBehaviour
 
     public int  PlayerSlot                        => _playerSlot;
     public void SetPlayerSlot(int slot)           => _playerSlot = slot;
+    public void  SetDamageMultiplier(float m)      => _incomingDamageMultiplier = m;
+    public float GetCurrentMultiplier()           => _incomingDamageMultiplier;
+    public void  ResetBaseStats()                 => _incomingDamageMultiplier = 1f;
+    public void  SetSpawnImmunity(float duration)  => _immunityEndTime = Time.time + duration;
+    public bool  IsImmune                         => Time.time < _immunityEndTime;
     public void SetHealthBarVisible(bool visible)
     {
         if (_healthBarRoot != null) _healthBarRoot.SetActive(visible);

@@ -1,3 +1,4 @@
+using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -23,7 +24,12 @@ public class PlayerController : NetworkBehaviour
     public float leanSmoothing = 8f;
 
     [Header("Jump")]
-    [SerializeField] float _jumpForce = 15f;  // launch velocity — what you set is what you get
+    [SerializeField] float _jumpHeight = 3f;  // target apex height in world units
+
+    // ── Base stat cache (populated in Start; card effects multiply against these) ───
+    [HideInInspector] public float baseSpeed;
+    int _maxJumps      = 1;   // 1 = single jump; 2 = double jump (DoubleJump card)
+    int _jumpsRemaining;
 
     [Header("Ground Check")]
     public Transform playerPos;
@@ -34,7 +40,12 @@ public class PlayerController : NetworkBehaviour
 
     [Header("Gun")]
     [SerializeField] Transform _gunHandAttach;
-    public Transform GunHandAttach => _gunHandAttach;
+    [SerializeField] Transform _leftGunHandAttach;
+    public Transform GunHandAttach     => _gunHandAttach;
+    public Transform LeftGunHandAttach => _leftGunHandAttach;
+
+    [Header("Spawn Anchor")]
+    [SerializeField] Transform _spawnAnchor;   // drag "Spawn Player" GO here
 
     [Header("Animation")]
     public Animator anim;
@@ -47,6 +58,18 @@ public class PlayerController : NetworkBehaviour
         new(0.2f, 1f, 0.4f, 1f),
     };
 
+    [Header("Head Types")]
+    [SerializeField] GameObject[] _headTypeObjects;   // drag each head variant GO here (0=circle, 1=diamond, 2=polygon)
+
+    // ── Customization NetworkVariables (owner writes, everyone reads) ─────────
+    // Owner pushes their saved settings on spawn; all clients apply them visually.
+    NetworkVariable<FixedString64Bytes> _netPlayerName = new(
+        default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Owner);
+    NetworkVariable<int> _netHeadType = new(
+        0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Owner);
+    NetworkVariable<Color32> _netColor = new(
+        new Color32(255, 255, 255, 255), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Owner);
+
     // ── Synced state (server writes, everyone reads) ───────────────────────
     NetworkVariable<Vector2> _syncedPosition = new NetworkVariable<Vector2>(
         Vector2.zero,
@@ -55,12 +78,6 @@ public class PlayerController : NetworkBehaviour
 
     NetworkVariable<int> _syncedAnimDir = new NetworkVariable<int>(
         0,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
-
-    // Server writes airborne state — clients play jump anim when true
-    NetworkVariable<bool> _syncedAirborne = new NetworkVariable<bool>(
-        false,
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server);
 
@@ -104,6 +121,7 @@ public class PlayerController : NetworkBehaviour
         _rightLegRb = rightLeg.GetComponent<Rigidbody2D>();
         _leftLegRb.sleepMode  = RigidbodySleepMode2D.NeverSleep;
         _rightLegRb.sleepMode = RigidbodySleepMode2D.NeverSleep;
+        baseSpeed = speed;
     }
 
     // ── NGO ────────────────────────────────────────────────────────────────
@@ -114,11 +132,22 @@ public class PlayerController : NetworkBehaviour
         Camera cam = GetComponentInChildren<Camera>();
         if (cam != null) cam.enabled = IsOwner;
 
-        // Color by connection slot
-        int   slot = GetPlayerSlot();
-        Color col  = slot < _slotColors.Length ? _slotColors[slot] : Color.white;
-        foreach (var sr in GetComponentsInChildren<SpriteRenderer>())
-            sr.color = col;
+        // Subscribe to customization changes — fires on all clients whenever owner updates
+        _netColor.OnValueChanged    += OnNetColorChanged;
+        _netHeadType.OnValueChanged += OnNetHeadTypeChanged;
+
+        if (IsOwner)
+        {
+            // Push saved customization settings to all clients on spawn
+            var d = SaveLoadManager.Instance?.Data ?? new PlayerSaveData();
+            _netPlayerName.Value = new FixedString64Bytes(d.playerName);
+            _netHeadType.Value   = d.headTypeIndex;
+            _netColor.Value      = (Color32)d.ToColor();
+        }
+
+        // Apply current values immediately (handles host and late-joiners)
+        ApplyColor(_netColor.Value);
+        ApplyHeadType(_netHeadType.Value);
 
         if (IsServer)
         {
@@ -129,7 +158,8 @@ public class PlayerController : NetworkBehaviour
         else
         {
             // Clients are pure renderers — disable ALL rigidbodies completely
-            foreach (var r in GetComponentsInChildren<Rigidbody2D>())
+            // true = include inactive GOs (head variant GOs are inactive until ApplyHeadType runs)
+            foreach (var r in GetComponentsInChildren<Rigidbody2D>(true))
             {
                 r.isKinematic = true;
                 r.simulated   = false;
@@ -143,9 +173,10 @@ public class PlayerController : NetworkBehaviour
         }
 
         // Clear stale input carried over from the previous scene
-        _pendingH         = 0f;
-        _pendingJump      = false;
-        _lastSentH        = 0f;
+        _pendingH           = 0f;
+        _pendingJump        = false;
+        _jumpBufferFrames   = 0;
+        _lastSentH          = 0f;
         _suppressHorizontal = false;
     }
 
@@ -159,12 +190,18 @@ public class PlayerController : NetworkBehaviour
     [ClientRpc]
     public void InitializePositionClientRpc(Vector2 spawnPos)
     {
+        // _spawnAnchor ("Spawn Player" GO) is a static child of the root — its localPosition
+        // is a fixed offset from the root rb. We shift the root so the anchor lands on spawnPos.
+        Vector2 anchorOffset = _spawnAnchor != null ? (Vector2)_spawnAnchor.localPosition : Vector2.zero;
+        Vector2 rootTarget   = spawnPos - anchorOffset;
+
         if (IsServer)
         {
-            // Shift every ragdoll body by the same delta so joints don't fight each other
+            // Shift every ragdoll body by the same delta so joints don't fight each other.
+            // includeInactive:true so inactive head variant bodies also get repositioned.
             if (rb != null)
             {
-                Vector2 delta = spawnPos - rb.position;
+                Vector2 delta = rootTarget - rb.position;
                 foreach (var r in GetComponentsInChildren<Rigidbody2D>())
                 {
                     r.position       += delta;
@@ -173,15 +210,15 @@ public class PlayerController : NetworkBehaviour
                 }
             }
 
-            _syncedPosition.Value = spawnPos;
+            _syncedPosition.Value = rootTarget;
 
             // Force-broadcast new positions so clients snap rather than lerp from old spot
-            GetComponent<RagdollSync>()?.ServerTeleport(spawnPos);
+            GetComponent<RagdollSync>()?.BroadcastCurrentPositions();
         }
         else
         {
             // Root snap — RagdollSync.SnapStateClientRpc (sent by server above) handles the limbs
-            transform.position = new Vector3(spawnPos.x, spawnPos.y, 0f);
+            transform.position = new Vector3(rootTarget.x, rootTarget.y, 0f);
         }
     }
 
@@ -307,14 +344,6 @@ public class PlayerController : NetworkBehaviour
         int dir = _pendingH > 0 ? 1 : _pendingH < 0 ? -1 : 0;
         if (dir != _syncedAnimDir.Value) _syncedAnimDir.Value = dir;
 
-        // Broadcast airborne state — use all ground check points so any foot contact counts
-        bool grounded = (leftFootPos   != null && Physics2D.OverlapCircle(leftFootPos.position,   positionRadius, ground))
-                     || (rightFootPos  != null && Physics2D.OverlapCircle(rightFootPos.position,  positionRadius, ground))
-                     || (playerPos     != null && Physics2D.OverlapCircle(playerPos.position,     positionRadius, ground));
-        bool airborne = !grounded;
-        if (airborne != _syncedAirborne.Value) _syncedAirborne.Value = airborne;
-
-
         ApplySyncedAnimation(dir);
     }
 
@@ -398,14 +427,19 @@ public class PlayerController : NetworkBehaviour
             _hoveredDraftCard = nearest;
             if (_draftManager != null)
                 _draftManager.UpdateHoverServerRpc(nearestIdx);
+            if (nearest != null)
+                AudioManager.Instance?.PlayCardPickSFX();
         }
 
         // ── Calculate h and send movement to server ─────────────────────
+        // Use transform.position — rb.position is stale on non-server clients
+        // because their Rigidbody2D has simulated=false and never gets physics updates.
         float h = 0f;
-        if (nearest != null && rb != null)
+        if (nearest != null)
         {
-            float targetX = nearest.WorldTarget != null ? nearest.WorldTarget.position.x : rb.position.x;
-            float dx      = targetX - rb.position.x;
+            float myX     = transform.position.x;
+            float targetX = nearest.WorldTarget != null ? nearest.WorldTarget.position.x : myX;
+            float dx      = targetX - myX;
             h             = Mathf.Abs(dx) > 0.3f ? Mathf.Sign(dx) : 0f;
         }
 
@@ -492,17 +526,24 @@ public class PlayerController : NetworkBehaviour
     {
         if (rb == null) return;
 
-        // Check feet first, then fall back to a broad torso-level cast so
-        // ragdoll foot wobble doesn't prevent jumping when clearly on the ground
         bool leftGrounded   = leftFootPos  != null && Physics2D.OverlapCircle(leftFootPos.position,  positionRadius,        ground);
         bool rightGrounded  = rightFootPos != null && Physics2D.OverlapCircle(rightFootPos.position, positionRadius,        ground);
         bool centerGrounded = playerPos    != null && Physics2D.OverlapCircle(playerPos.position,    positionRadius * 2.5f, ground);
+        bool isGrounded     = leftGrounded || rightGrounded || centerGrounded;
 
-        if (!leftGrounded && !rightGrounded && !centerGrounded) return;
+        // Refill jumps on landing
+        if (isGrounded) _jumpsRemaining = _maxJumps;
 
-        // Grounded — consume buffer and launch
+        if (_jumpsRemaining <= 0) return;
+
+        // Consume the jump (and the input buffer)
         _jumpBufferFrames = 0;
-        rb.velocity = new Vector2(rb.velocity.x, _jumpForce);
+        _jumpsRemaining--;
+
+        // v = sqrt(2 * |g_effective| * h) — reaches exactly _jumpHeight apex
+        float effectiveGravity = Mathf.Abs(Physics2D.gravity.y) * Mathf.Max(rb.gravityScale, 0.01f);
+        float jumpVelocity     = Mathf.Sqrt(2f * effectiveGravity * _jumpHeight);
+        rb.velocity = new Vector2(rb.velocity.x, jumpVelocity);
 
         if (AudioManager.Instance != null)
             AudioManager.Instance.PlayJumpSFX();
@@ -511,6 +552,29 @@ public class PlayerController : NetworkBehaviour
     // ── Public API ─────────────────────────────────────────────────────────
 
     public int GetPlayerSlotPublic() => GetPlayerSlot();
+
+    /// <summary>Returns the player's custom display name, or "Player {slot+1}" if they left the default.</summary>
+    public string PlayerDisplayName
+    {
+        get
+        {
+            string n = _netPlayerName.Value.ToString().Trim();
+            return (string.IsNullOrEmpty(n) || n == "Player")
+                ? $"Player {GetPlayerSlot() + 1}"
+                : n;
+        }
+    }
+
+    /// <summary>Returns the player's chosen character color.</summary>
+    public Color PlayerColor => (Color)(Color32)_netColor.Value;
+
+    /// <summary>Finds the PlayerController that owns the given slot index (0/1/2).</summary>
+    public static PlayerController GetBySlot(int slot)
+    {
+        foreach (var pc in FindObjectsOfType<PlayerController>(true))
+            if (pc.GetPlayerSlotPublic() == slot) return pc;
+        return null;
+    }
 
     int GetPlayerSlot()
     {
@@ -526,10 +590,18 @@ public class PlayerController : NetworkBehaviour
         return 0;
     }
 
+    public bool IsInputEnabled => _inputEnabled;
+
     public void SetInputEnabled(bool enabled)
     {
         _inputEnabled = enabled;
-        if (!enabled && rb != null) rb.velocity = Vector2.zero;
+        if (!enabled && rb != null)
+        {
+            rb.velocity       = Vector2.zero;
+            _pendingJump      = false;
+            _jumpBufferFrames = 0;
+            _jumpsRemaining   = 0;
+        }
     }
 
     /// <summary>
@@ -539,7 +611,19 @@ public class PlayerController : NetworkBehaviour
     [ClientRpc]
     public void SetInputEnabledClientRpc(bool enabled)
     {
-        if (!IsOwner) return;
+        // Owner: gates client-side input capture.
+        // Server: gates server-side physics so buffered input isn't processed during countdown.
+        if (!IsOwner && !IsServer) return;
+        SetInputEnabled(enabled);
+    }
+
+    /// <summary>
+    /// Called by PauseManager on the owning client. Freezes/unfreezes this player's
+    /// physics on the server without affecting any other player.
+    /// </summary>
+    [ServerRpc]
+    public void SetInputEnabledServerRpc(bool enabled)
+    {
         SetInputEnabled(enabled);
     }
 
@@ -561,4 +645,44 @@ public class PlayerController : NetworkBehaviour
         yield return new WaitForSeconds(duration);
         _suppressHorizontal = false;
     }
+
+    // ── Card effect API (server only) ─────────────────────────────────────
+
+    public void SetMaxJumps(int n)  => _maxJumps = n;
+    public int  GetMaxJumps()       => _maxJumps;
+    public void ResetBaseStats()
+    {
+        speed     = baseSpeed;
+        _maxJumps = 1;
+        _jumpsRemaining = 0;
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        base.OnNetworkDespawn();
+        _netColor.OnValueChanged    -= OnNetColorChanged;
+        _netHeadType.OnValueChanged -= OnNetHeadTypeChanged;
+    }
+
+    // ── Customization helpers ──────────────────────────────────────────────
+
+    void OnNetColorChanged(Color32 prev, Color32 current)    => ApplyColor(current);
+    void OnNetHeadTypeChanged(int prev, int current)         => ApplyHeadType(current);
+
+    void ApplyColor(Color32 col)
+    {
+        foreach (var sr in GetComponentsInChildren<SpriteRenderer>())
+            sr.color = col;
+    }
+
+    void ApplyHeadType(int index)
+    {
+        if (_headTypeObjects == null) return;
+        for (int i = 0; i < _headTypeObjects.Length; i++)
+        {
+            if (_headTypeObjects[i] == null) continue;
+            _headTypeObjects[i].SetActive(i == index);
+        }
+    }
+
 }

@@ -1,148 +1,214 @@
-# AbsoluteChaos - Multiplayer Arena Game
+# Absolute Chaos — Multiplayer Ragdoll Arena
 
-A fast-paced multiplayer arena game built in Unity where players compete to eliminate each other across rounds. The game features local multiplayer connectivity, a round-based scoring system, and core gameplay systems including player movement and match flow.
+A fast-paced 3-player ragdoll stick figure brawler built in Unity. Players compete across rounds in physics-driven arenas, picking up guns, throwing them, and punching each other off the stage. A card draft between rounds lets survivors stack passive upgrades. First to 5 round wins takes the match.
 
 [GitHub Repository](https://github.com/BlueRobotMiner/AbsoluteChaos)
 
-<<<<<<< HEAD
+---
+
 ## Known Issues
 
-- I am prioritizing fixing local first.
-- (Fixed)Combat system is partially implemented; Player 2 cannot shoot   
-- Player card UI only displays one card instead of the full list  
-- (fixed Due to the player not being able to move left and right while they jump)Movement physics feel floaty during jumps  
-- Rematch System only displays player one now doesn't respawn player 2 and the rematch system puts them in the lobby instead of it the draft first draft again 
-- (Fixed Kinda) Player 2 UI does not update correctly on some maps  
-- Relay networking is not fully tested Some issues are bound to be here
-- Player cannot throw gone when it's above their head for some reason Also I believe layer two can't throw their gun in general.
-- When the game is over guns do not despawn when utilizing the rematch button.
-- Player cards are not fully implemented does not currently exactly do anything.
-- Guns still currently fall through the map But they respawn themselves back at the spawn point if they go too far off the screen.
+### Active (Unresolved)
+- **Bullet visuals linger on Player 2's screen** — depending on the gun used, visual bullets stick at their impact position for a few seconds instead of disappearing instantly; the 8-second fallback removes them but the root cause (certain gun hit paths not triggering `NotifyHitClientRpc` in time) is under investigation
+- **Player 1 draft movement can loop endlessly** — sometimes the drafter's character walks left or right and does not stop under the mouse cursor; believed to be a rect-space mismatch between the card UI canvas and the world camera at certain resolutions
+- **Arms clip through countdown overlay** — when the round-start countdown panel fades in, ragdoll arms and hands can visually poke through above the UI panel before physics settles; cosmetic only
+- **ExplosiveRounds card animation non-functional** — the `BroadcastExplosion` RPC now fires correctly and the `ExplosionEffect` component exists, but the explosion circle animation does not play on impact; requires the explosion child GO to be properly assigned in the bullet prefab inspector
+- **Gun does not despawn on rematch** — guns despawn correctly at match end, but persist through a rematch vote back into CardDraft
+- **Three-player testing incomplete** — the game is designed for 3 players but has only been regularly tested with 2; edge cases around 3-player draft order and elimination flow may surface
+- **Right-click active card** — `RMB` active card activation is stubbed; no card has an active effect yet
 
-## Additional bug fixes
-- Players not being able to jump move around correctly and map has been fixed due to me forgetting to put a box Collider on the ground latforms
+### Resolved
+- ~~Card effects not implemented~~ — **FIXED** — all passive card effects apply each round via `MapManager.ApplyCardForSlot` (SpeedBoost, DoubleJump, RapidFire, Ricochet, ExplosiveRounds, AmmoStash, HealthPackRain, LowGravity, HeavyGravity, Fragile)
+- ~~Player cards passive effects unimplemented~~ — **FIXED** — see above
+- ~~No pause menu~~ — **FIXED** — pause menu implemented
+- ~~Relay requires a full build~~ — **FIXED** — Unity Relay confirmed working in-editor
+- ~~Gun slightly offset on Player 2 while holder moves quickly~~ — **FIXED**
 
-=======
+---
+
 ## Setup
 
 ### Prerequisites
-- Unity 2022.3.62f3
+- Unity 2022.3.62f3 (LTS)
 - Git
 
 ### Installation
-
-1. Clone this repository:
 ```bash
 git clone https://github.com/BlueRobotMiner/AbsoluteChaos.git
 ```
+1. Open the project in Unity Hub
+2. Open `Assets/Scenes/MainMenu.unity`
+3. Press Play to test in the editor
 
-2. Open the project in Unity Hub  
-3. Open the MainMenu scene in Assets/Scenes/  
-4. Press Play to test in the editor  
+---
 
 ## How to Play
 
 ### Controls
-- WASD: Move and Jump  
-<<<<<<< HEAD
-- Space: Jump
-- Mouse: Aim  
-- Left Click: Shoot/ Punch if you don't have a gun (No animation currently) 
-- G: Throw gun
-=======
-- Mouse: Aim  
-- Left Click: Shoot (Currently broken for Player 2)  
-- Escape: Pause menu  
+| Input | Action |
+|-------|--------|
+| A / D | Move left / right |
+| Space | Jump |
+| Mouse | Aim arm |
+| Left Click | Shoot (with gun) / Punch (no gun) |
+| Right Click | Active card (stub — not yet implemented) |
+| G | Throw held gun |
 
 ### Objective
-Eliminate all other players to win the round. Every round win earns 1 point. The first player to reach 5 points wins the match.
+Eliminate all other players to win the round. First player to **5 round wins** takes the match.
 
-## Testing Multiplayer
-Currently only tested with two people even though for the final roject it is supposed to be working with three people Reason why testing like this is it's easier to find bug fixes to make sure that player three can also work And so on
+---
 
-### Option 1: Local Network (LAN)
-1. One on player one screen click and then click Create local Then it will put you in a lobby to show you your I
-2. When that lobby is created player two screen if you're using the same C to test this your join hitting join and then join local button the text box above should already implement the local IP
-=======
+## Multiplayer Setup
 
-### Option 1: Local Network (LAN)
-1. Build the project (File -> Build Settings -> Build)  
-2. Run the built executable  
-3. Press Play in the Unity Editor  
-4. In one instance, click "Host Game"  
-5. In the other instance, click "Join Game" and enter 127.0.0.1  
+### Local Network (LAN)
+1. One machine clicks **Host → Create Local** — your LAN IP is shown in the lobby
+2. The other machine clicks **Join → Join Local** — the IP field auto-fills; hit Submit
 
-### Option 2: Online (Unity Relay)
-1. Host an "Online Relay" session from the Main Menu  
-2. Copy the generated Join Code  
-3. In the other instance, enter the code and click "Join"
+### Online (Unity Relay)
+1. Host clicks **Host → Create Public** — a 6-character join code appears top-left of the lobby
+2. The other player enters that code under **Join → Submit**
+> Note: Relay requires a full build to work reliably. Running both instances in the Editor may not connect.
 
-4. Here's how a generation you click host Create public it gives a code in the top left of the lobby screen you give that code to the second lay they enter that code when they hit join above join public and then it should connect them But if you're using this as in Unity Unreal you might not get it working. I believe for it work it would have to be a full build.
-=======
-3. In the other instance, enter the code and click "Join"  
+---
+
+## Scene Flow
+```
+MainMenu → Lobby (playable arena, waiting room)
+        → CardDraft (all players pick 1 card — first draft only)
+              → Map1 → CardDraft (losers pick)
+              → Map2 → CardDraft (losers pick)
+              → Map3 → CardDraft (losers pick)
+              → Map1 → ... (rotation shuffles, continues until 5 wins)
+                    → Results (match winner, rematch vote)
+```
+
+---
+
+## Technical Implementation
+
+| Pattern | File | Notes |
+|---------|------|-------|
+| **Singleton** | `GameManager.cs`, `AudioManager.cs` | Persist across scenes via DontDestroyOnLoad |
+| **Object Pool** | `ProjectilePool.cs` | Queue-based bullet pool, overflow-safe |
+| **Delegate Events** | `GameManager.cs` | `OnRoundEnd`, `OnMatchEnd`, `OnPlayerEliminated` |
+| **Server Authority** | `PlayerController.cs`, `Gun.cs` | Server runs all physics; clients are pure renderers |
+
+---
+
+## Bug Fixes (This Build)
+
+### Networking / Multiplayer
+- **Player 2 couldn't move after dying** — `SetInputEnabled` was server-only; fixed with `SetInputEnabledClientRpc` targeting the owner
+- **Player 2 couldn't shoot after respawn** — same pattern; added `SetShootingEnabledClientRpc`
+- **HUD didn't sync to Player 2** — round/match events only fired on the server; added `SyncRoundEndClientRpc` / `SyncMatchEndClientRpc` to push scores and fire delegate events on clients
+- **Health bars not re-enabled on map load** — server called `SetHealthBarVisible` locally only; fixed with `ShowHealthBarsClientRpc`
+- **Health bar text stale on spawn** — `NetworkVariable.OnValueChanged` doesn't fire when value is unchanged; force-refresh `UpdateHealthUI` when the bar becomes visible
+- **Card stacks never synced to Player 2** — `GameManager.PlayerCardStacks` is a plain list, server-only; added `SyncCardPickClientRpc` so every confirmed pick propagates to all clients
+- **Card icons and names blank on Player 2's HUD** — consequence of empty stacks above; resolved by the sync fix plus explicitly setting `nameLabel.text` in `CardHUD.Refresh()`
+- **Player not spawning after draft scene** — player GameObjects set `SetActive(false)` during draft carry that state into the next map; added `ReactivateAllPlayersClientRpc` in `MapManager.RespawnAfterLoad` to re-enable all player GOs before repositioning
+- **Player 2 character not moving on draft screen** — `SetInputEnabledClientRpc(false)` disabled the server-side physics gate for P2; `EnableDraftAfterDelay` re-enabled input locally but never unblocked the server's `HandleMove`; added `SetInputEnabledServerRpc(true)` call in `CardDraftingUI`
+
+### Gun
+- **Gun throw not visible on Player 2** — `NetworkTransform` was re-enabled on the server but not on clients after throw; fixed in `ClearHolderClientRpc`
+- **Gun immediately re-picked up after throw** — colliders re-enabled while still overlapping the thrower caused instant `OnTriggerEnter2D`; added `_pickupCooldownEnd` (0.5 s grace period)
+- **Gun zipping on Player 2 screen during throw** — NT's interpolation buffer was stale (disabled during entire hold period); fixed by having the throwing client send their local gun position in `ThrowWeaponServerRpc`; server snaps to that position before launching, then broadcasts it to all clients via `ClearHolderClientRpc` so NT starts from the correct origin
+- **Gun floating / lagging behind hand on Player 2** — server-driven NT had inherent interpolation delay; reverted to each client independently reading the local hand transform while held (NT disabled during hold, re-enabled on throw)
+- **Gun collider resized by spin effect** — spin code was modifying `sr.transform.localScale` which, when the SpriteRenderer is on the root GO, also scales the physics colliders; replaced with `flipX` toggling (pure visual, zero physics impact)
+- **Gun spun like a wheel (Z-axis)** — changed to a Y-axis coin-flip effect using `SpriteRenderer.flipX` driven by `Mathf.Sin`
+- **Collider confusion after swap** — BoxCollider2D is now the pickup trigger, CircleCollider2D is the solid landing collider; `IgnorePlayerCollisions` finds the solid by `!isTrigger` so no code changes were needed
+
+### Movement / Physics
+- **Jump broken while walking** — `rb.MovePosition()` overwrote the Y component every frame, killing gravity; replaced with `rb.velocity = new Vector2(h * speed, rb.velocity.y)`
+- **Knockback immediately cancelled by movement** — `HandleMove` overwrote `velocity.x` every FixedUpdate; added `_suppressHorizontal` flag and `KnockbackSuppressCoroutine`
+- **Killbox pushed players in the wrong direction** — direction was relative to the killbox position which caused side boxes to push vertically; replaced with a live `(mapCenter − player).normalized` direction so every killbox always pushes toward the map center
+
+### Card Draft
+- **NullRef in `HandleDraftInput`** — `SetDraftMode(false, null, null)` nulled `_draftManager` before the reference was used; saved to a local variable first
+- **Player character flashing during drafter transition** — `InitializePositionClientRpc` (on the player's NetworkObject) and `DealCardsClientRpc` (on CardDraftingUI) are different objects so NGO gives no ordering guarantee; fixed by hiding all players immediately, then showing only the drafter after one frame
+- **Dead players appearing during last drafter's pick** — `ShowAllPlayersClientRpc` was called before scene transition and re-enabled dead player GOs; removed the call; map load now re-enables players via `ReactivateAllPlayersClientRpc`
+
+### Projectiles
+- **Bullet lifetime not tied to impact** — bullets previously despawned on a timer regardless of whether they hit anything; removed lifetime logic entirely; bullets now only despawn on surface impact
+- **Ricochet stackable** — `SetRicochet(bool)` replaced with `AddRicochetBounces(int)`; each Ricochet card adds 3 bounces that stack additively
+- **Explosive bullet despawned before animation** — `BroadcastExplosion` was gated behind a null check on `_explosionEffect`; if the field was unassigned the bullet fell through to `BroadcastHit` and was immediately removed; `BroadcastExplosion` now always fires when `_explosive` is true
+
+### UI / Audio
+- **Rematch sent players to Lobby instead of CardDraft** — `StartRematch()` was loading `"Lobby"`; corrected to `"CardDraft"`
+- **Round progress bars showed text labels** — replaced with color-coded sliders tinted to each player's slot color
+- **Music never changed from main menu track** — `AudioManager` now subscribes to `SceneManager.sceneLoaded` and auto-switches: menu/lobby → menu music, CardDraft → draft music, maps → game music
+- **Tooltip canvas visible at scene start** — canvas panel must be set **inactive** in the Unity hierarchy; `CardHUD` calls `SetActive(false)` in both `Awake` and `Start` but can't prevent a one-frame flash if the designer leaves it active in the scene
+- **Countdown SFX never played** — `ShowCountdownClientRpc` only updated text; added a dedicated `PlayCountdownSFXClientRpc` fired once at countdown start so all clients hear the audio clip
+- **Punch playing hit SFX instead of punch SFX** — `PlayerHealth.OnHealthChanged` played `PlayHitSFX` for all damage sources; removed it; bullet hits now play `PlayHitSFX` via `NotifyHitClientRpc` (all clients), punch hits play `PlayPunchSFX` via `PlayPunchSFXClientRpc` broadcast when `PunchServerRpc` connects
+- **Health pack playing hit SFX** — `HealthPack.cs` was calling `PlayHitSFX`; corrected to `PlayHealthPickupSFX`
+- **Bullet visuals lingering on Player 2 screen** — trigger colliders were left enabled on client-side visual bullets generating unnecessary callbacks; disabled all colliders on visual bullets; added an 8-second fallback lifetime in `BulletVisual.Update` to clean up any orphaned visuals the server hit RPC never reached (e.g. bullets that exit the map)
+
+---
+
+## Features
+
+### Card System
+- 10 cards implemented with real gameplay effects
+- Draft screen: the drafter's ragdoll physically walks toward the hovered card; hovering triggers card scale-up and audio feedback
+- Cards that modify the global environment (LowGravity, HeavyGravity) are de-prioritized in the offer pool when another player already owns them
+- Stacking supported: owning a card twice multiplies its effect (e.g. two RapidFire cards = 0.25× fire rate)
+
+### Character Customization
+- Players can set a display name, choose a head shape, and pick a body color before entering the lobby
+- Preferences saved to `Application.persistentDataPath/playersave.json` via `JsonUtility`
+- Color and head type sync to all clients on spawn via owner-writable `NetworkVariable`s
+
+### Round System
+- Sequential card draft: one eligible player picks at a time; others wait off-screen
+- First draft: all players pick; subsequent drafts: only losers pick
+- Scores tracked across rounds; first to 5 wins the match
+- Map rotation cycles through Map1 → Map2 → Map3 → Map1... (expandable)
+- Round-start countdown with "3 2 1 FIGHT!" overlay and audio; input locked until countdown completes
+
+### Combat
+- Server-authoritative ragdoll with client-predicted input
+- Guns drop from sky on round start; can be thrown as a projectile (G key)
+- Unarmed punch: lunge + AoE hit detection, knockback impulse
+- Ricochet, ExplosiveRounds, and RapidFire cards modify bullet behavior per-round
+
+---
 
 ## Project Structure
 
 ```
-AbsoluteChaos/
-├── README.md
-├── Assets/
-│   ├── Scenes/
-│   │   ├── MainMenu.unity
-│   │   ├── Lobby.unity
-│   │   └── Map1.unity
-        └── Results
-│   ├── Audio/
-│   ├── Scripts/
-│   │   ├── Managers/
-│   │   ├── Player/
-│   │   ├── Combat/
-│   │   └── UI/
-│   ├── Prefabs/
-│   └── Audio/
-├── Packages/
-└── ProjectSettings/
+Assets/
+├── Scenes/
+│   ├── MainMenu.unity
+│   ├── Lobby.unity
+│   ├── CardDraft.unity
+│   ├── Map1.unity
+│   ├── Map2.unity
+│   ├── Map3.unity
+│   └── Results.unity
+├── Scripts/
+│   ├── Network/          RelayManager, NetworkInitializer, NetworkLobbyManager
+│   ├── Player Logic/     PlayerController, PlayerCombat, PlayerHealth,
+│   │                     ArmAimController, BalanceController,
+│   │                     IgnoreLimbCollisions, RagdollSync, BulletVisual
+│   ├── Weapons/          Gun, GunSpawner
+│   ├── Cards/            CardDraftingUI, CardDatabase, CardIconRegistry,
+│   │                     CardSlot, CardData, CardHUD
+│   ├── Map Logic/        MapManager, ProjectilePool, RoundStartUI, ItemSpawner
+│   ├── Items/            HealthPack
+│   ├── Save/             SaveLoadManager, PlayerSaveData, SettingsSaveManager
+│   └── UI/               UIManager, RoundProgressUI, ResultsManager,
+│                         NetworkLobbyManager
+├── Prefabs/
+└── Audio/
 ```
 
-## Technical Implementation
-
-**Singleton Pattern**
-- Location: Assets/Scripts/Managers/GameManager.cs  
-- Description: Manages match scoring, win condition (first to 5), and scene transitions  
-
-**Object Pool Pattern (Additional Design Pattern)**
-- Location: Assets/Scripts/Combat/ProjectilePool.cs  
-- Description: Pools projectile instances to improve performance during gameplay  
-
-**Multiplayer Networking (Core System)**
-- Location: Assets/Scripts/Networking/NetworkInitializer.cs  
-- Description: Handles host/client setup and switches between Local IP and Unity Relay connections  
-
-
-## Known Issues
-
-- Combat system is partially implemented; Player 2 cannot shoot  
-- Player card UI only displays one card instead of the full list  
-- Movement physics feel floaty during jumps  
-- Rematch system duplicates Player 1  
-- Player 2 UI does not update correctly on some maps  
-- Relay networking is not fully tested  
-
-## Future Enhancements (Final Submission)
-
-- Implement working combat system for all players  
-- Add SQLite database for persistent player statistics  
-- Improve physics for more realistic movement  
-- Complete Relay multiplayer system  
-- Add AudioManager for music transitions  
-- Replace placeholder graphics with finalized assets and visual effects  
+---
 
 ## Technologies Used
 
-<<<<<<< HEAD
-- Unity 2022.3.62f3  
-- C#: Game engine  
-- Netcode for GameObjects: Multiplayer networking  
-- Unity Relay: Online connectivity  
-- SQLite (planned): Persistent data storage  
-- TextMeshPro: UI text rendering  
+- **Unity 2022.3.62f3**
+- **C#** — game logic
+- **Netcode for GameObjects 1.12.2** — server-authoritative multiplayer
+- **Unity Relay 1.2.0** — online connectivity (join codes)
+- **Unity Transport 1.5.0** — underlying network transport
+- **TextMeshPro** — all UI text

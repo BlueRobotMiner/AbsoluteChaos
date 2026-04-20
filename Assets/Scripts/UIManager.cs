@@ -16,6 +16,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] GameObject _hostPanel;
     [SerializeField] GameObject _joinPanel;
     [SerializeField] GameObject _settingsPanel;
+    [SerializeField] GameObject _characterPanel;
 
     // ── Main Menu Buttons ────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] Button _hostButton;
     [SerializeField] Button _joinButton;
     [SerializeField] Button _settingsButton;
+    [SerializeField] Button _characterButton;
     [SerializeField] Button _quitButton;
 
     // ── Host Panel ───────────────────────────────────────────────────────
@@ -44,10 +46,29 @@ public class UIManager : MonoBehaviour
     // ── Settings Panel ───────────────────────────────────────────────────
 
     [Header("Settings Panel")]
-    [SerializeField] Slider _musicVolumeSlider;
-    [SerializeField] Slider _sfxVolumeSlider;
-    [SerializeField] Button _settingsApplyButton;
-    [SerializeField] Button _settingsBackButton;
+    [SerializeField] SettingsPanel _settingsPanelComponent;
+
+    // ── Character Panel ───────────────────────────────────────────────────
+
+    [Header("Character Panel")]
+    [SerializeField] Button         _characterBackButton;
+    [SerializeField] TMP_InputField _nameInputField;
+
+    [Header("Head Cycle Selector")]
+    [SerializeField] Button  _headLeftButton;    // ← arrow
+    [SerializeField] Button  _headRightButton;   // → arrow
+    [SerializeField] Image   _headPreviewImage;  // center — sprite changes per head type
+    [SerializeField] Sprite[] _headTypeSprites;  // one sprite per head type (0=circle etc.)
+
+    [Header("Color Cycle Selector")]
+    [SerializeField] Button  _colorLeftButton;   // ← arrow
+    [SerializeField] Button  _colorRightButton;  // → arrow
+    [SerializeField] Image   _colorPreviewImage; // center — Image color tinted to current preset
+    [SerializeField] Color[] _presetColors;      // list of colors to cycle through
+
+    // Runtime indices — tracked separately from save data so arrows feel instant
+    int _currentHeadIndex;
+    int _currentColorIndex;
 
     // ── Error display ─────────────────────────────────────────────────────
 
@@ -66,7 +87,9 @@ public class UIManager : MonoBehaviour
         // Main menu navigation
         _hostButton.onClick.AddListener(()     => ShowPanel(_hostPanel));
         _joinButton.onClick.AddListener(OnJoinPanelOpened);
-        _settingsButton.onClick.AddListener(() => ShowPanel(_settingsPanel));
+        _settingsButton.onClick.AddListener(OpenSettings);
+        if (_characterButton != null)
+            _characterButton.onClick.AddListener(OnCharacterPanelOpened);
         _quitButton.onClick.AddListener(Application.Quit);
 
         // Host panel
@@ -81,23 +104,21 @@ public class UIManager : MonoBehaviour
         if (_joinBackButton != null)
             _joinBackButton.onClick.AddListener(() => ShowPanel(_mainMenuPanel));
 
-        // Settings panel
-        if (_settingsBackButton  != null) _settingsBackButton.onClick.AddListener(() => ShowPanel(_mainMenuPanel));
-        if (_settingsApplyButton != null) _settingsApplyButton.onClick.AddListener(() => ShowPanel(_mainMenuPanel));
-        if (_musicVolumeSlider != null)
-        {
-            _musicVolumeSlider.onValueChanged.AddListener(v => AudioManager.Instance?.SetMusicVolume(v));
-            AudioManager.Instance?.SetMusicVolume(_musicVolumeSlider.value);  // apply default (80) immediately
-        }
-        if (_sfxVolumeSlider != null)
-        {
-            _sfxVolumeSlider.onValueChanged.AddListener(v => AudioManager.Instance?.SetSFXVolume(v));
-            AudioManager.Instance?.SetSFXVolume(_sfxVolumeSlider.value);      // apply default (80) immediately
-        }
+        // Settings panel — logic lives in SettingsPanel component; just wire the OnClose callback
+        if (_settingsPanelComponent != null)
+            _settingsPanelComponent.OnClose = () => ShowPanel(_mainMenuPanel);
+
+        // Prefer the persistent singleton over the scene-serialized reference —
+        // the scene's NetworkManager GO may be destroyed by NGO if one already exists.
+        if (_networkInitializer == null || _networkInitializer.gameObject == null)
+            _networkInitializer = NetworkInitializer.Instance;
 
         // NetworkInitializer error event only — join code is handled in Lobby by NetworkLobbyManager
-        _networkInitializer.OnNetworkError += OnNetworkError;
-        _networkInitializer.OnConnecting   += OnConnecting;
+        if (_networkInitializer != null)
+        {
+            _networkInitializer.OnNetworkError += OnNetworkError;
+            _networkInitializer.OnConnecting   += OnConnecting;
+        }
 
         ShowPanel(_mainMenuPanel);
         HideError();
@@ -119,25 +140,34 @@ public class UIManager : MonoBehaviour
         _mainMenuPanel.SetActive(_mainMenuPanel == target);
         _hostPanel.SetActive(_hostPanel         == target);
         _joinPanel.SetActive(_joinPanel         == target);
-        _settingsPanel.SetActive(_settingsPanel == target);
+        if (_settingsPanel  != null) _settingsPanel.SetActive(_settingsPanel   == target);
+        if (_characterPanel != null) _characterPanel.SetActive(_characterPanel == target);
+    }
+
+    void OpenSettings()
+    {
+        // Hide all regular panels, then let SettingsPanel show itself
+        ShowPanel(null);
+        if (_settingsPanelComponent != null)
+            _settingsPanelComponent.gameObject.SetActive(true);
     }
 
     // ── Host handlers ─────────────────────────────────────────────────────
 
     void OnCreatePublicClicked()
     {
+        if (_networkInitializer == null) { ShowError("Network not ready."); return; }
         SetHostButtonsInteractable(false);
         HideError();
         _networkInitializer.HostOnlineAsync();
-        // Scene will change to Lobby — NetworkLobbyManager shows the relay code there
     }
 
     void OnCreateLocalClicked()
     {
+        if (_networkInitializer == null) { ShowError("Network not ready."); return; }
         SetHostButtonsInteractable(false);
         HideError();
         _networkInitializer.HostLocalAsync();
-        // Scene will change to Lobby — NetworkLobbyManager hides the code text for local games
     }
 
     void SetHostButtonsInteractable(bool interactable)
@@ -150,6 +180,7 @@ public class UIManager : MonoBehaviour
 
     void OnSubmitClicked()
     {
+        if (_networkInitializer == null) { ShowError("Network not ready."); return; }
         string code = _codeInputField.text.Trim().ToUpper();
         if (string.IsNullOrEmpty(code)) { ShowError("Please enter a join code."); return; }
         HideError();
@@ -167,10 +198,155 @@ public class UIManager : MonoBehaviour
 
     void OnJoinLocalClicked()
     {
+        if (_networkInitializer == null) { ShowError("Network not ready."); return; }
         string ip = _ipInputField != null ? _ipInputField.text.Trim() : string.Empty;
         if (!System.Net.IPAddress.TryParse(ip, out _)) { ShowError("Enter a valid IP address."); return; }
         HideError();
         _networkInitializer.JoinLocalAsync(ip);
+    }
+
+    // ── Character panel handlers ──────────────────────────────────────────
+
+    void OnCharacterPanelOpened()
+    {
+        var data = SaveLoadManager.Instance?.Data ?? new PlayerSaveData();
+
+        // Restore saved indices
+        _currentHeadIndex  = data.headTypeIndex;
+        _currentColorIndex = ColorIndexFromSave(data);
+
+        // Populate name field
+        if (_nameInputField != null)
+        {
+            _nameInputField.text = data.playerName;
+            _nameInputField.onEndEdit.RemoveListener(OnNameEdited);
+            _nameInputField.onEndEdit.AddListener(OnNameEdited);
+        }
+
+        // Wire arrows — RemoveAllListeners prevents double-registration on repeated opens
+        if (_headLeftButton  != null) { _headLeftButton.onClick.RemoveAllListeners();  _headLeftButton.onClick.AddListener(OnHeadLeft);   }
+        if (_headRightButton != null) { _headRightButton.onClick.RemoveAllListeners(); _headRightButton.onClick.AddListener(OnHeadRight);  }
+        if (_colorLeftButton  != null) { _colorLeftButton.onClick.RemoveAllListeners();  _colorLeftButton.onClick.AddListener(OnColorLeft);  }
+        if (_colorRightButton != null) { _colorRightButton.onClick.RemoveAllListeners(); _colorRightButton.onClick.AddListener(OnColorRight); }
+
+        if (_characterBackButton != null)
+        {
+            _characterBackButton.onClick.RemoveListener(OnCharacterPanelClosed);
+            _characterBackButton.onClick.AddListener(OnCharacterPanelClosed);
+        }
+
+        // Refresh preview displays
+        RefreshHeadPreview();
+        RefreshColorPreview();
+
+        ShowPanel(_characterPanel);
+    }
+
+    void OnCharacterPanelClosed()
+    {
+        // Flush all current selections to disk in one save
+        if (SaveLoadManager.Instance != null)
+        {
+            var data = SaveLoadManager.Instance.Data;
+            if (_nameInputField != null)
+                data.playerName = _nameInputField.text;
+            data.headTypeIndex = _currentHeadIndex;
+            if (_presetColors != null && _currentColorIndex >= 0 && _currentColorIndex < _presetColors.Length)
+                data.FromColor(_presetColors[_currentColorIndex]);
+            SaveLoadManager.Instance.Save();
+        }
+        ShowPanel(_mainMenuPanel);
+    }
+
+    // ── Head cycle ────────────────────────────────────────────────────────
+
+    void OnHeadLeft()
+    {
+        int count = _headTypeSprites != null ? _headTypeSprites.Length : 1;
+        _currentHeadIndex = (_currentHeadIndex - 1 + count) % count;
+        SaveHeadIndex();
+        RefreshHeadPreview();
+    }
+
+    void OnHeadRight()
+    {
+        int count = _headTypeSprites != null ? _headTypeSprites.Length : 1;
+        _currentHeadIndex = (_currentHeadIndex + 1) % count;
+        SaveHeadIndex();
+        RefreshHeadPreview();
+    }
+
+    void RefreshHeadPreview()
+    {
+        if (_headPreviewImage == null || _headTypeSprites == null) return;
+        if (_currentHeadIndex >= 0 && _currentHeadIndex < _headTypeSprites.Length)
+        {
+            _headPreviewImage.sprite = _headTypeSprites[_currentHeadIndex];
+            _headPreviewImage.color  = Color.white;   // always show the sprite unaltered
+        }
+    }
+
+    void SaveHeadIndex()
+    {
+        if (SaveLoadManager.Instance == null) return;
+        SaveLoadManager.Instance.Data.headTypeIndex = _currentHeadIndex;
+        SaveLoadManager.Instance.Save();
+    }
+
+    // ── Color cycle ───────────────────────────────────────────────────────
+
+    void OnColorLeft()
+    {
+        int count = _presetColors != null ? _presetColors.Length : 1;
+        _currentColorIndex = (_currentColorIndex - 1 + count) % count;
+        SaveColorIndex();
+        RefreshColorPreview();
+    }
+
+    void OnColorRight()
+    {
+        int count = _presetColors != null ? _presetColors.Length : 1;
+        _currentColorIndex = (_currentColorIndex + 1) % count;
+        SaveColorIndex();
+        RefreshColorPreview();
+    }
+
+    void RefreshColorPreview()
+    {
+        if (_colorPreviewImage == null || _presetColors == null) return;
+        if (_currentColorIndex < 0 || _currentColorIndex >= _presetColors.Length) return;
+        Color c = _presetColors[_currentColorIndex];
+        c.a = 1f;   // force fully opaque — Unity defaults new Color array entries to alpha 0
+        _colorPreviewImage.color = c;
+    }
+
+    void SaveColorIndex()
+    {
+        if (SaveLoadManager.Instance == null || _presetColors == null) return;
+        SaveLoadManager.Instance.Data.FromColor(_presetColors[_currentColorIndex]);
+        SaveLoadManager.Instance.Save();
+    }
+
+    /// <summary>Finds which preset color index best matches the saved color (exact match first, fallback to 0).</summary>
+    int ColorIndexFromSave(PlayerSaveData data)
+    {
+        if (_presetColors == null) return 0;
+        Color saved = data.ToColor();
+        for (int i = 0; i < _presetColors.Length; i++)
+            if (Mathf.Approximately(_presetColors[i].r, saved.r) &&
+                Mathf.Approximately(_presetColors[i].g, saved.g) &&
+                Mathf.Approximately(_presetColors[i].b, saved.b))
+                return i;
+        return 0;
+    }
+
+    // ── Name ──────────────────────────────────────────────────────────────
+
+    void OnNameEdited(string value)
+    {
+        if (SaveLoadManager.Instance == null) return;
+        SaveLoadManager.Instance.Data.playerName = value;
+        SaveLoadManager.Instance.Save();
     }
 
     // ── NetworkInitializer event handlers ─────────────────────────────────

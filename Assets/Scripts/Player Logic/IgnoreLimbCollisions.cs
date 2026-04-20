@@ -1,30 +1,14 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class IgnoreLimbCollisions : MonoBehaviour
 {
     void Start()
     {
-        var colliders = GetComponentsInChildren<Collider2D>();
+        // Only ignore collisions within THIS player's own colliders.
+        // Cross-player collisions must stay active so punches and physics contact register.
+        var colliders = GetComponentsInChildren<Collider2D>(true);
         for (int i = 0; i < colliders.Length; i++)
-        {
             for (int k = i + 1; k < colliders.Length; k++)
-            {
                 Physics2D.IgnoreCollision(colliders[i], colliders[k]);
-            }
-        }
     }
-
-    private void OnCollisionEnter2D(Collision2D collision)
-    {
-        if (collision.gameObject.tag == "Player")
-        {
-            Physics2D.IgnoreCollision(
-                this.gameObject.GetComponent<Collider2D>(),
-                collision.gameObject.GetComponent<Collider2D>());
-        }
-    }
-
-
 }

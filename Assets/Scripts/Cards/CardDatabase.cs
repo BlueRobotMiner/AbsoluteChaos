@@ -19,6 +19,10 @@ public class CardDatabase : MonoBehaviour
 
         if (_db.Table<CardRow>().Count() == 0)
             SeedCards();
+
+        // Force-update descriptions that may have changed since initial seed
+        _db.Execute("UPDATE Cards SET Description=? WHERE Id=?",
+            "Guns you pick up carry a larger magazine than normal.", (int)CardId.AmmoStash);
     }
 
     void SeedCards()

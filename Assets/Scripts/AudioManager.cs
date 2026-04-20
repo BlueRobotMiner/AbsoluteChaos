@@ -1,4 +1,6 @@
+using System.Collections;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Singleton audio manager — persists across all scene loads.
@@ -29,16 +31,30 @@ public class AudioManager : MonoBehaviour
     // ── Inspector ────────────────────────────────────────────────────────
 
     [Header("Music")]
-    [SerializeField] AudioClip _menuMusic;
-    [SerializeField] AudioClip _gameMusic;
-    [SerializeField] AudioClip _draftMusic;
+    [SerializeField] AudioClip   _menuMusic;
+    [SerializeField] AudioClip   _draftMusic;
+    [SerializeField] AudioClip[] _mapMusicTracks;   // randomly cycled during map rounds
 
-    [Header("SFX")]
+    [Header("SFX — Combat")]
     [SerializeField] AudioClip _shootSFX;
     [SerializeField] AudioClip _hitSFX;
     [SerializeField] AudioClip _deathSFX;
+    [SerializeField] AudioClip _punchSFX;
+    [SerializeField] AudioClip _ricochetSFX;
+
+    [Header("SFX — Movement")]
     [SerializeField] AudioClip _jumpSFX;
+    [SerializeField] AudioClip _landSFX;
+
+    [Header("SFX — Items")]
+    [SerializeField] AudioClip _gunPickupSFX;
+    [SerializeField] AudioClip _gunThrowSFX;
+    [SerializeField] AudioClip _healthPickupSFX;
+
+    [Header("SFX — UI / Round")]
     [SerializeField] AudioClip _roundEndSFX;
+    [SerializeField] AudioClip _victorySFX;
+    [SerializeField] AudioClip _countdownSFX;
     [SerializeField] AudioClip _cardPickSFX;
 
     // Internal 0-1 values — sliders send 0-100, divided on receipt
@@ -46,14 +62,49 @@ public class AudioManager : MonoBehaviour
     float _sfxVolume   = 0.8f;
 
     AudioSource _musicSource;
+    Coroutine   _musicCycleCoroutine;
 
     // ── Unity ─────────────────────────────────────────────────────────────
 
     void Start()
     {
-        // Subscribe to game events as soon as GameManager is available
+        // Apply saved volumes — AudioManager owns this so timing is always correct
+        var settings = SettingsSaveManager.Instance.Data;
+        SetMusicVolume(settings.musicVolume);
+        SetSFXVolume(settings.sfxVolume);
+
         if (GameManager.Instance != null)
             SubscribeToGameEvents();
+
+        OnSceneLoaded(SceneManager.GetActiveScene(), LoadSceneMode.Single);
+    }
+
+    void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        switch (scene.name)
+        {
+            case "MainMenu":
+            case "Lobby":
+                PlayMenuMusic();
+                break;
+            case "CardDraft":
+                PlayDraftMusic();
+                break;
+            default:
+                // Any map scene — starts a random cycling coroutine
+                PlayMapMusic();
+                break;
+        }
     }
 
     void SubscribeToGameEvents()
@@ -64,9 +115,36 @@ public class AudioManager : MonoBehaviour
 
     // ── Music ─────────────────────────────────────────────────────────────
 
-    public void PlayMenuMusic()  => SwitchMusic(_menuMusic);
-    public void PlayGameMusic()  => SwitchMusic(_gameMusic);
-    public void PlayDraftMusic() => SwitchMusic(_draftMusic);
+    public void PlayMenuMusic()  { StopMusicCycle(); SwitchMusic(_menuMusic); }
+    public void PlayDraftMusic() { StopMusicCycle(); SwitchMusic(_draftMusic); }
+    public void PlayMapMusic()
+    {
+        StopMusicCycle();
+        if (_mapMusicTracks == null || _mapMusicTracks.Length == 0) return;
+        _musicCycleCoroutine = StartCoroutine(CycleMapMusic());
+    }
+
+    IEnumerator CycleMapMusic()
+    {
+        int lastIndex = -1;
+        while (true)
+        {
+            int index;
+            do { index = UnityEngine.Random.Range(0, _mapMusicTracks.Length); }
+            while (_mapMusicTracks.Length > 1 && index == lastIndex);
+            lastIndex = index;
+
+            var clip = _mapMusicTracks[index];
+            SwitchMusic(clip);
+
+            yield return new WaitForSeconds(clip != null ? clip.length : 60f);
+        }
+    }
+
+    void StopMusicCycle()
+    {
+        if (_musicCycleCoroutine != null) { StopCoroutine(_musicCycleCoroutine); _musicCycleCoroutine = null; }
+    }
 
     void SwitchMusic(AudioClip clip)
     {
@@ -78,12 +156,20 @@ public class AudioManager : MonoBehaviour
 
     // ── SFX ───────────────────────────────────────────────────────────────
 
-    public void PlayShootSFX()    => PlaySFX(_shootSFX);
-    public void PlayHitSFX()      => PlaySFX(_hitSFX);
-    public void PlayDeathSFX()    => PlaySFX(_deathSFX);
-    public void PlayJumpSFX()     => PlaySFX(_jumpSFX);
-    public void PlayRoundEndSFX() => PlaySFX(_roundEndSFX);
-    public void PlayCardPickSFX() => PlaySFX(_cardPickSFX);
+    public void PlayShootSFX()        => PlaySFX(_shootSFX);
+    public void PlayHitSFX()          => PlaySFX(_hitSFX);
+    public void PlayDeathSFX()        => PlaySFX(_deathSFX);
+    public void PlayPunchSFX()        => PlaySFX(_punchSFX);
+    public void PlayRicochetSFX()     => PlaySFX(_ricochetSFX);
+    public void PlayJumpSFX()         => PlaySFX(_jumpSFX);
+    public void PlayLandSFX()         => PlaySFX(_landSFX);
+    public void PlayGunPickupSFX()    => PlaySFX(_gunPickupSFX);
+    public void PlayGunThrowSFX()     => PlaySFX(_gunThrowSFX);
+    public void PlayHealthPickupSFX() => PlaySFX(_healthPickupSFX);
+    public void PlayRoundEndSFX()     => PlaySFX(_roundEndSFX);
+    public void PlayVictorySFX()      => PlaySFX(_victorySFX);
+    public void PlayCountdownSFX()    => PlaySFX(_countdownSFX);
+    public void PlayCardPickSFX()     => PlaySFX(_cardPickSFX);
 
     void PlaySFX(AudioClip clip)
     {

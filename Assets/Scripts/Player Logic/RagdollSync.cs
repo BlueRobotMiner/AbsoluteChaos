@@ -28,7 +28,7 @@ public class RagdollSync : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        var all  = GetComponentsInChildren<Rigidbody2D>();
+        var all  = GetComponentsInChildren<Rigidbody2D>(true);   // true = include inactive head variants
         var list = new System.Collections.Generic.List<Rigidbody2D>();
         foreach (var rb in all)
             if (rb.gameObject != gameObject) list.Add(rb);
@@ -139,36 +139,20 @@ public class RagdollSync : NetworkBehaviour
     // ── Teleport (server → immediate snap on all clients) ─────────────────
 
     /// <summary>
-    /// Server only. Shifts every ragdoll body by the delta between the current root
-    /// position and newRootPos, zeroes velocities, then force-broadcasts so clients
-    /// snap instantly instead of lerping from the old position.
+    /// Server only. Broadcasts the current physics positions to all clients immediately
+    /// (bypasses the per-frame throttle) so clients snap rather than lerp from stale state.
+    /// Does NOT shift any bodies — caller is responsible for positioning them first.
     /// </summary>
-    public void ServerTeleport(Vector2 newRootPos)
+    public void BroadcastCurrentPositions()
     {
         if (!IsServer || _bodies == null) return;
 
-        // Use the first body as the reference root (index 0 is set in OnNetworkSpawn order)
-        // Fall back to transform.position if no bodies yet
-        Vector2 currentRoot = _bodies.Length > 0
-            ? _bodies[0].position
-            : (Vector2)transform.position;
-
-        Vector2 delta = newRootPos - currentRoot;
-
-        foreach (var rb in _bodies)
-        {
-            rb.position        += delta;
-            rb.velocity         = Vector2.zero;
-            rb.angularVelocity  = 0f;
-        }
-
-        // Force an immediate broadcast that snaps clients (bypasses throttle)
         var positions = new Vector2[_bodies.Length];
         var rotations = new float[_bodies.Length];
         for (int i = 0; i < _bodies.Length; i++)
         {
-            positions[i] = _bodies[i].position;
-            rotations[i] = _bodies[i].rotation;
+            positions[i]    = _bodies[i].position;
+            rotations[i]    = _bodies[i].rotation;
             _lastSentPos[i] = positions[i];
             _lastSentRot[i] = rotations[i];
         }
