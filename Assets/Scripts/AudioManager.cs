@@ -100,6 +100,11 @@ public class AudioManager : MonoBehaviour
             case "CardDraft":
                 PlayDraftMusic();
                 break;
+            case "Results":
+                StopMusicCycle();
+                _musicSource.Stop();
+                PlayVictorySFX();
+                break;
             default:
                 // Any map scene — starts a random cycling coroutine
                 PlayMapMusic();

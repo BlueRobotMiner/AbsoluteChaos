@@ -294,7 +294,19 @@ public class MapManager : NetworkBehaviour
     IEnumerator LoadResults(int winnerSlot)
     {
         yield return new WaitForSeconds(_roundEndDelay);
+        DespawnAllGuns();
+        DespawnAllPlayers();
+        yield return null;
         NetworkManager.Singleton.SceneManager.LoadScene("Results", LoadSceneMode.Single);
+    }
+
+    void DespawnAllPlayers()
+    {
+        foreach (var pc in FindObjectsOfType<PlayerController>(true))
+        {
+            if (pc.TryGetComponent(out NetworkObject no) && no.IsSpawned)
+                no.Despawn(true);
+        }
     }
 
 }

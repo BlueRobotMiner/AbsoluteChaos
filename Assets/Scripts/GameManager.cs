@@ -51,10 +51,26 @@ public class GameManager : MonoBehaviour
     /// </summary>
     public bool RoundsActive { get; set; } = false;
 
-    // ── Map ───────────────────────────────────────────────────────────────
+    // ── Map rotation ──────────────────────────────────────────────────────
 
-    // Single map for Unit 13 draft — expand to rotation post-semester
-    public string GetNextMap() => "Map1";
+    static readonly string[] _allMaps = { "Map1", "Map2", "Map3" };
+    readonly List<string> _mapQueue = new List<string>();
+
+    public string GetNextMap()
+    {
+        if (_mapQueue.Count == 0)
+        {
+            _mapQueue.AddRange(_allMaps);
+            for (int i = _mapQueue.Count - 1; i > 0; i--)
+            {
+                int j = UnityEngine.Random.Range(0, i + 1);
+                (_mapQueue[i], _mapQueue[j]) = (_mapQueue[j], _mapQueue[i]);
+            }
+        }
+        string next = _mapQueue[0];
+        _mapQueue.RemoveAt(0);
+        return next;
+    }
 
     // ── Delegates (satisfies the delegate technical requirement) ──────────
 
@@ -130,6 +146,7 @@ public class GameManager : MonoBehaviour
         IsFirstDraft    = true;
         LastRoundWinner = -1;
         RoundsActive    = false;
+        _mapQueue.Clear();
     }
 }
 
