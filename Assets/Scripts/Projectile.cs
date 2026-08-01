@@ -44,7 +44,7 @@ public class Projectile : MonoBehaviour
 
     void OnDisable()
     {
-        _rb.velocity        = Vector2.zero;
+        _rb.linearVelocity        = Vector2.zero;
         _rb.gravityScale    = 0f;
         _rb.simulated       = true;
         _activeDamage       = _damage;
@@ -61,16 +61,16 @@ public class Projectile : MonoBehaviour
         if (_bouncesRemaining <= 0) return;
         if (!Unity.Netcode.NetworkManager.Singleton.IsServer) return;
 
-        float dist = _rb.velocity.magnitude * Time.fixedDeltaTime * 2f;
+        float dist = _rb.linearVelocity.magnitude * Time.fixedDeltaTime * 2f;
         if (dist < 0.001f) return;
 
         LayerMask bounceMask = _wallLayer | _groundLayer | _objectLayer;
-        var hit = Physics2D.Raycast(transform.position, _rb.velocity.normalized, dist, bounceMask);
+        var hit = Physics2D.Raycast(transform.position, _rb.linearVelocity.normalized, dist, bounceMask);
         if (hit.collider != null)
         {
-            _rb.velocity = Vector2.Reflect(_rb.velocity, hit.normal);
+            _rb.linearVelocity = Vector2.Reflect(_rb.linearVelocity, hit.normal);
             _bouncesRemaining--;
-            _ownerCombat?.BroadcastRicochet(_rb.position, _rb.velocity);
+            _ownerCombat?.BroadcastRicochet(_rb.position, _rb.linearVelocity);
         }
     }
 
@@ -98,7 +98,7 @@ public class Projectile : MonoBehaviour
         _bouncesRemaining = bounces;
 
         float spd    = speedOverride > 0f ? speedOverride : _speed;
-        _rb.velocity = direction.normalized * spd;
+        _rb.linearVelocity = direction.normalized * spd;
 
         _activeDamage = damageOverride > 0 ? damageOverride : _damage;
     }

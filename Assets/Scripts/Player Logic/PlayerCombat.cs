@@ -266,7 +266,7 @@ public class PlayerCombat : NetworkBehaviour
         if (visual.TryGetComponent(out Rigidbody2D rb))
         {
             rb.isKinematic = true;
-            rb.velocity    = Vector2.zero;
+            rb.linearVelocity    = Vector2.zero;
         }
 
         // Visual-only bullet — disable all colliders; OnTriggerEnter2D returns early on clients anyway

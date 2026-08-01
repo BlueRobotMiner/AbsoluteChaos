@@ -45,7 +45,7 @@ public class RagdollSync : NetworkBehaviour
         for (int i = 0; i < n; i++)
         {
             _bodies[i].angularVelocity = 0f;
-            _bodies[i].velocity        = Vector2.zero;
+            _bodies[i].linearVelocity        = Vector2.zero;
             _bodies[i].rotation        = 0f;
 
             // Seed interpolation targets to current positions so there's no initial snap

@@ -178,7 +178,7 @@ public class Gun : NetworkBehaviour
         if ((_groundLayer.value & (1 << col.gameObject.layer)) == 0) return;
 
         _landed             = true;
-        _rb.velocity        = Vector2.zero;
+        _rb.linearVelocity        = Vector2.zero;
         _rb.angularVelocity = 0f;
         _rb.gravityScale    = 1f;
         _rb.isKinematic     = true;
@@ -212,7 +212,7 @@ public class Gun : NetworkBehaviour
         ItemSpawner.Instance?.NotifyItemPickedUp(NetworkObject);
 
         _rb.isKinematic = true;
-        _rb.velocity    = Vector2.zero;
+        _rb.linearVelocity    = Vector2.zero;
 
         foreach (var col in _allColliders) col.enabled = false;
 
@@ -356,7 +356,7 @@ public class Gun : NetworkBehaviour
         if (_rb != null)
         {
             _rb.isKinematic = true;
-            _rb.velocity    = Vector2.zero;
+            _rb.linearVelocity    = Vector2.zero;
         }
         foreach (var col in _allColliders) col.enabled = false;
     }
@@ -384,7 +384,7 @@ public class Gun : NetworkBehaviour
 
         _rb.isKinematic     = false;
         _rb.gravityScale    = _throwGravityScale;
-        _rb.velocity        = throwDir * _throwForce;
+        _rb.linearVelocity        = throwDir * _throwForce;
         _rb.angularVelocity = 0f;
         _rb.rotation        = 0f;   // reset to flat — don't inherit arm aim angle
 
