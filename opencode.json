@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "unity-mcp": {
+      "type": "local",
+      "command": ["C:\\Users\\Zach\\.unity\\relay\\relay_win.exe", "--mcp"],
+      "enabled": true
+    }
+  }
+}
