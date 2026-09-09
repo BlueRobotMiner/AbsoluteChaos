@@ -26,8 +26,9 @@ public class RelayManager : MonoBehaviour
         Allocation allocation = await RelayService.Instance.CreateAllocationAsync(MaxConnections);
         string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
 
-        // Use 2-arg constructor — required for Relay SDK 1.x; old 9-arg tutorials overload is wrong
-        NM.GetComponent<UnityTransport>().SetRelayServerData(new RelayServerData(allocation, "dtls"));
+        // Multiplayer Services SDK: the RelayServerData(Allocation, string) ctor is gone —
+        // build it via the AllocationUtils extension instead.
+        NM.GetComponent<UnityTransport>().SetRelayServerData(allocation.ToRelayServerData("dtls"));
 
         Debug.Log($"[RelayManager] Relay created. Join code: {joinCode}");
         return joinCode;
@@ -43,7 +44,7 @@ public class RelayManager : MonoBehaviour
 
         JoinAllocation join = await RelayService.Instance.JoinAllocationAsync(joinCode: joinCode);
 
-        NM.GetComponent<UnityTransport>().SetRelayServerData(new RelayServerData(join, "dtls"));
+        NM.GetComponent<UnityTransport>().SetRelayServerData(join.ToRelayServerData("dtls"));
 
         Debug.Log($"[RelayManager] Joined relay. Code: {joinCode}");
     }

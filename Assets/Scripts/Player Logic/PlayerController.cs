@@ -205,7 +205,7 @@ public class PlayerController : NetworkBehaviour
                 foreach (var r in GetComponentsInChildren<Rigidbody2D>())
                 {
                     r.position       += delta;
-                    r.velocity        = Vector2.zero;
+                    r.linearVelocity        = Vector2.zero;
                     r.angularVelocity = 0f;
                 }
             }
@@ -472,12 +472,12 @@ public class PlayerController : NetworkBehaviour
 
         if (h != 0 && !_suppressHorizontal)
             // Set horizontal velocity only — preserve rb.velocity.y so gravity and jump are unaffected
-            rb.velocity = new Vector2(h * speed, rb.velocity.y);
+            rb.linearVelocity = new Vector2(h * speed, rb.linearVelocity.y);
         else
             // Stopping drag — bleeds off horizontal momentum, vertical untouched
-            rb.velocity = new Vector2(
-                rb.velocity.x * (1f - stoppingDrag * Time.fixedDeltaTime),
-                rb.velocity.y);
+            rb.linearVelocity = new Vector2(
+                rb.linearVelocity.x * (1f - stoppingDrag * Time.fixedDeltaTime),
+                rb.linearVelocity.y);
 
         UpdateLean();
         HandleStep(h);
@@ -486,7 +486,7 @@ public class PlayerController : NetworkBehaviour
     void UpdateLean()
     {
         if (torsoBalance == null || rb == null) return;
-        float target = Mathf.Clamp(-rb.velocity.x * leanFactor, -maxLean, maxLean);
+        float target = Mathf.Clamp(-rb.linearVelocity.x * leanFactor, -maxLean, maxLean);
         torsoBalance.targetRotation = Mathf.LerpAngle(
             torsoBalance.targetRotation, target, leanSmoothing * Time.fixedDeltaTime);
     }
@@ -543,7 +543,7 @@ public class PlayerController : NetworkBehaviour
         // v = sqrt(2 * |g_effective| * h) — reaches exactly _jumpHeight apex
         float effectiveGravity = Mathf.Abs(Physics2D.gravity.y) * Mathf.Max(rb.gravityScale, 0.01f);
         float jumpVelocity     = Mathf.Sqrt(2f * effectiveGravity * _jumpHeight);
-        rb.velocity = new Vector2(rb.velocity.x, jumpVelocity);
+        rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpVelocity);
 
         if (AudioManager.Instance != null)
             AudioManager.Instance.PlayJumpSFX();
@@ -597,7 +597,7 @@ public class PlayerController : NetworkBehaviour
         _inputEnabled = enabled;
         if (!enabled && rb != null)
         {
-            rb.velocity       = Vector2.zero;
+            rb.linearVelocity       = Vector2.zero;
             _pendingJump      = false;
             _jumpBufferFrames = 0;
             _jumpsRemaining   = 0;
@@ -634,7 +634,7 @@ public class PlayerController : NetworkBehaviour
     public void ApplyKnockback(Vector2 force, float suppressDuration = 0.35f)
     {
         if (rb == null) return;
-        rb.velocity = new Vector2(0f, rb.velocity.y);   // clear horizontal so impulse isn't fighting it
+        rb.linearVelocity = new Vector2(0f, rb.linearVelocity.y);   // clear horizontal so impulse isn't fighting it
         rb.AddForce(force, ForceMode2D.Impulse);
         StartCoroutine(KnockbackSuppressCoroutine(suppressDuration));
     }

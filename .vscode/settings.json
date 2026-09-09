@@ -56,5 +56,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "AbsoluteChaos.sln"
+    "dotnet.defaultSolution": "AbsoluteChaos.slnx"
 }

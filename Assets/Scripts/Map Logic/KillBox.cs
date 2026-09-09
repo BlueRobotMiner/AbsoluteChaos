@@ -74,11 +74,11 @@ public class KillBox : MonoBehaviour
             if (normal == Vector2.zero) normal = Vector2.up;
 
             // Reflect current velocity so they bounce back the way they came
-            Vector2 reflected = Vector2.Reflect(pc.rb.velocity, normal);
+            Vector2 reflected = Vector2.Reflect(pc.rb.linearVelocity, normal);
 
             // Add extra outward push that grows each hit
             float force = _baseForce * ks.multiplier;
-            pc.rb.velocity = reflected + normal * force;
+            pc.rb.linearVelocity = reflected + normal * force;
 
             // Suppress horizontal input briefly so the bounce isn't immediately cancelled
             pc.ApplyKnockback(Vector2.zero, Mathf.Lerp(0.2f, 0.6f,
